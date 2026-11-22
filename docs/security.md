@@ -44,7 +44,12 @@ therefore the unsealed secrets; nothing in a container prevents that.
    swap (`memswap_limit` = `mem_limit`), no core dumps. Passwords reach restic
    only through `--password-file /dev/fd/3` (pipe), never through arguments
    (visible in `ps`) or the environment (visible in `/proc/<pid>/environ`).
-   restic gets an allow-listed environment. Job logs and UI output are
+   The pipe is written in a goroutine and closed right after the password
+   (restic reads the file until EOF); the caller zeroes the password only
+   after that goroutine has finished. restic gets an allow-listed
+   environment (`PATH`, `HOME` = cache directory, `LANG=C`, `TZ`); nothing
+   else is inherited, so a stray `RESTIC_PASSWORD` in the container cannot
+   reach it (verified in tests, issue #3). Job logs and UI output are
    filtered for the secret values. Limit: Go's AES implementation keeps its
    own expanded copy of the key, which cannot be zeroed; BelayPoint creates
    the cipher per operation, so that copy is short-lived garbage.

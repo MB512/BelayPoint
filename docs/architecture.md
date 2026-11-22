@@ -295,6 +295,14 @@ Job types (all run `restic` with the local backend `-r /repos/<path>`,
 client backs up, and client backups wait (or fail) while they run. Both sides
 use `--retry-lock` (issue #2).
 
+`internal/restic` wraps the CLI behind the `restic.Runner` interface. It
+recognizes restic's exit codes for a wrong password (12; restic before
+0.17.1 exits with 1 and is matched by its message), a missing repository (10)
+and a lock conflict (11). Cancelling a run (shutdown, a cancelled job) sends
+SIGINT, so restic removes its own lock; restic is killed only if it has not
+exited after 30 seconds. Read-only commands (`cat config`, `snapshots`) run
+with `--no-lock`.
+
 ### Maintenance plan
 
 Per repository one plan, run as **one job** in a maintenance window (cron
