@@ -120,8 +120,9 @@ not allowed is closed immediately (no certificate, no HTTP response).
 | Strict (`BELAYPOINT_LAN_ADDRESS` set) | only the subnet of `BELAYPOINT_LAN_ADDRESS` (plus loopback) |
 | Both modes | plus every network in `BELAYPOINT_ALLOW_CIDRS` |
 
-Additionally, every HTTP request carrying `Cf-Ray`, `Cf-Connecting-IP` or
-`Cdn-Loop: cloudflare` is rejected and logged as a misconfiguration: such a
+Additionally, every HTTP request carrying a Cloudflare header (`Cf-Ray`,
+`Cf-Connecting-IP`, `Cf-IPCountry`, `Cf-Visitor`, or `Cdn-Loop: cloudflare`)
+is rejected and logged as a misconfiguration: such a
 request came through the tunnel.
 
 Only the TCP source address counts. `X-Forwarded-For` and similar headers are
@@ -155,6 +156,10 @@ At startup (`internal/tlscert`):
    the old and new SHA-256 fingerprints are logged.
 4. The SHA-256 fingerprints of the CA and the server certificate are logged at
    every start.
+
+Without `BELAYPOINT_LAN_ADDRESS` and `BELAYPOINT_HOSTNAMES` the server
+certificate is issued for `localhost` and `127.0.0.1` only, and a warning is
+logged: browsers will report a name mismatch.
 
 Because the CA stays the same, a changed LAN address or a renewal needs no new
 trust in the browser once the CA is imported. Without importing the CA, the
