@@ -24,7 +24,7 @@ type Snapshot struct {
 // not wait for (or block) a running backup.
 func (c *CLI) Snapshots(ctx context.Context, dir string, password []byte) ([]Snapshot, error) {
 	var out bytes.Buffer
-	if err := c.run(ctx, dir, password, []string{"snapshots", "--no-lock"}, &out, nil); err != nil {
+	if err := c.run(ctx, dir, password, []string{"snapshots", "--no-lock", "--json"}, &out, nil); err != nil {
 		return nil, err
 	}
 	return parseSnapshots(out.Bytes())

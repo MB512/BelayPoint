@@ -97,7 +97,7 @@ func TestPasswordOnlyOnFD3(t *testing.T) {
 	c := fakeCLI(t, "report")
 	password := []byte("correct horse battery staple")
 	var out bytes.Buffer
-	if err := c.run(context.Background(), "/repos/alice/main", password, []string{"cat", "config"}, &out, nil); err != nil {
+	if err := c.run(context.Background(), "/repos/alice/main", password, []string{"cat", "config", "--no-lock"}, &out, nil); err != nil {
 		t.Fatal(err)
 	}
 	var rep fakeReport
@@ -115,7 +115,7 @@ func TestPasswordOnlyOnFD3(t *testing.T) {
 	if strings.Contains(rep.Environ, "RESTIC_PASSWORD") {
 		t.Error("parent environment was inherited")
 	}
-	want := []string{"--repo", "/repos/alice/main", "--password-file", "/dev/fd/3", "--cache-dir", c.CacheDir, "cat", "config", "--json"}
+	want := []string{"--repo", "/repos/alice/main", "--password-file", "/dev/fd/3", "--cache-dir", c.CacheDir, "cat", "config", "--no-lock"}
 	if strings.Join(rep.Args, " ") != strings.Join(want, " ") {
 		t.Errorf("args = %q, want %q", rep.Args, want)
 	}
@@ -413,4 +413,90 @@ func TestRealForgetPreview(t *testing.T) {
 	if entries, _ := os.ReadDir(filepath.Join(dir, "locks")); len(entries) != 0 {
 		t.Errorf("%d locks after the preview", len(entries))
 	}
+}
+
+func TestRealMaintenance(t *testing.T) {
+	if _, err := exec.LookPath("restic"); err != nil {
+		t.Skip("restic not installed")
+	}
+	c, err := New(t.TempDir(), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "repo")
+	data := t.TempDir()
+	pw := []byte("pw")
+	if err := c.run(ctx, dir, pw, []string{"init"}, io.Discard, nil); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		_ = os.WriteFile(filepath.Join(data, "f"), []byte(strings.Repeat("x", 1000*(i+1))), 0o600)
+		if err := c.run(ctx, dir, pw, []string{"backup", data}, io.Discard, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var log bytes.Buffer
+	groups, err := c.Forget(ctx, dir, pw, Policy{KeepLast: 1}, &log)
+	if err != nil || len(groups) != 1 || len(groups[0].Remove) != 2 || !strings.Contains(log.String(), "1 kept, 2 removed") {
+		t.Fatalf("forget: %+v %v\n%s", groups, err, log.String())
+	}
+	if list, _ := c.Snapshots(ctx, dir, pw); len(list) != 1 {
+		t.Errorf("%d snapshots left", len(list))
+	}
+	log.Reset()
+	if err := c.Prune(ctx, dir, pw, DefaultMaxUnused, &log); err != nil {
+		t.Fatalf("prune: %v\n%s", err, log.String())
+	}
+	if err := c.Prune(ctx, dir, pw, "5%; rm", io.Discard); err == nil {
+		t.Error("bad --max-unused accepted")
+	}
+	log.Reset()
+	if err := c.Check(ctx, dir, pw, "1/2", &log); err != nil || !strings.Contains(log.String(), "no errors") {
+		t.Fatalf("check: %v\n%s", err, log.String())
+	}
+
+	// Lock conflict with retry: a client backup (reading stdin from a
+	// pipe we keep open) holds a lock; forget waits RetryLock (2 s) for it
+	// and then fails with ErrLocked.
+	pr, pwr, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pwFile := filepath.Join(t.TempDir(), "pw")
+	_ = os.WriteFile(pwFile, pw, 0o600)
+	holder := exec.CommandContext(ctx, c.Binary, "--repo", dir, "--password-file", pwFile, "--cache-dir", c.CacheDir,
+		"backup", "--stdin", "--stdin-filename", "x") //nolint:gosec // test binary and paths
+	holder.Stdin = pr
+	if err := holder.Start(); err != nil {
+		t.Fatal(err)
+	}
+	_ = pr.Close()
+	defer func() { _ = pwr.Close(); _ = holder.Wait() }()
+	for range 500 {
+		if entries, _ := os.ReadDir(filepath.Join(dir, "locks")); len(entries) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	start := time.Now()
+	_, err = c.Forget(ctx, dir, pw, Policy{KeepLast: 1}, io.Discard)
+	if !errors.Is(err, ErrLocked) {
+		t.Errorf("forget during a backup: %v (%s)", err, mustVersion(t, c))
+	}
+	if err == nil {
+		t.Error("forget succeeded while a backup held a lock")
+	}
+	if d := time.Since(start); d < 2*time.Second {
+		t.Errorf("forget gave up after %v, before --retry-lock", d)
+	}
+}
+
+func mustVersion(t *testing.T, c *CLI) string {
+	t.Helper()
+	v, err := c.Version(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }

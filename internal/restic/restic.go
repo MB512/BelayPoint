@@ -53,6 +53,11 @@ type Runner interface {
 	// ForgetPreview shows what forget with the policy would remove,
 	// without changing anything.
 	ForgetPreview(ctx context.Context, dir string, password []byte, p Policy) ([]ForgetGroup, error)
+	// Forget, Prune and Check take an exclusive lock and wait up to
+	// RetryLock for other locks. Their output goes to log.
+	Forget(ctx context.Context, dir string, password []byte, p Policy, log io.Writer) ([]ForgetGroup, error)
+	Prune(ctx context.Context, dir string, password []byte, maxUnused string, log io.Writer) error
+	Check(ctx context.Context, dir string, password []byte, subset string, log io.Writer) error
 }
 
 // Error is a failed restic run.
@@ -133,7 +138,8 @@ func (c *CLI) CatConfig(ctx context.Context, dir string, password []byte) error 
 	return c.run(ctx, dir, password, []string{"cat", "config", "--no-lock"}, io.Discard, nil)
 }
 
-// run executes restic with the repository, the password pipe and args.
+// run executes restic with the repository, the password pipe and args
+// (which include --json where the output is parsed).
 // stdout receives restic's standard output; stderr, if not nil, a copy of
 // its error output.
 func (c *CLI) run(ctx context.Context, dir string, password []byte, args []string, stdout, stderr io.Writer) error {
@@ -142,7 +148,6 @@ func (c *CLI) run(ctx context.Context, dir string, password []byte, args []strin
 		"--password-file", "/dev/fd/3",
 		"--cache-dir", c.CacheDir,
 	}, args...)
-	full = append(full, "--json")
 
 	pr, pw, err := os.Pipe()
 	if err != nil {
@@ -209,7 +214,8 @@ func classify(args []string, err error, stderr string) error {
 		e.kind = ErrWrongPassword
 	case e.ExitCode == exitNoRepository:
 		e.kind = ErrNoRepository
-	case e.ExitCode == exitLocked:
+	case e.ExitCode == exitLocked,
+		e.ExitCode == 1 && bytes.Contains([]byte(stderr), []byte("repository is already locked")):
 		e.kind = ErrLocked
 	}
 	return e

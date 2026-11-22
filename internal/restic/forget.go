@@ -96,7 +96,7 @@ func (c *CLI) ForgetPreview(ctx context.Context, dir string, password []byte, p 
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	args := append([]string{"forget", "--dry-run", "--no-lock"}, p.Args()...)
+	args := append([]string{"forget", "--dry-run", "--no-lock", "--json"}, p.Args()...)
 	var out bytes.Buffer
 	if err := c.run(ctx, dir, password, args, &out, nil); err != nil {
 		return nil, err
