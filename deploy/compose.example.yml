@@ -1,0 +1,58 @@
+# Example: BelayPoint next to a rest-server that is reachable from the
+# internet only through a Cloudflare tunnel. Adjust the paths, the user and
+# the NAS's LAN address (192.168.1.10 here).
+#
+# Important:
+# - BelayPoint is NOT on the tunnel network. Its port is published on the
+#   LAN IPv4 address only.
+# - Mount the rest-server's data DIRECTORY (not .htpasswd alone): the file is
+#   replaced atomically, a single-file mount would keep the old inode.
+# - Run BelayPoint as the same user as the rest-server, so files written by
+#   prune stay usable for it.
+
+services:
+  rest-server:
+    image: restic/rest-server
+    user: "1000:1000"
+    environment:
+      OPTIONS: "--append-only --private-repos"
+    volumes:
+      - /volume1/restic:/data
+    networks: [tunnel]
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    networks: [tunnel]
+    restart: unless-stopped
+
+  belaypoint:
+    image: ghcr.io/mb512/belaypoint:latest
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
+    # Same value for both: no swap, so unsealed secrets never land on disk.
+    mem_limit: 512m
+    memswap_limit: 512m
+    ulimits:
+      core: 0
+    environment:
+      BELAYPOINT_LAN_ADDRESS: "192.168.1.10/24"
+      BELAYPOINT_HOSTNAMES: "nas.fritz.box"
+      TZ: Europe/Berlin
+    volumes:
+      - /volume1/restic:/repos
+      - ./belaypoint:/config
+    ports:
+      - "192.168.1.10:8443:8443"
+    networks: [admin]
+    restart: unless-stopped
+
+networks:
+  tunnel:
+  admin:
