@@ -54,7 +54,7 @@ const (
 	EnvAllowCIDRs      = "BELAYPOINT_ALLOW_CIDRS"
 	EnvListen          = "BELAYPOINT_LISTEN"
 	EnvReposDir        = "BELAYPOINT_REPOS_DIR"
-	EnvHtpasswd        = "BELAYPOINT_HTPASSWD"
+	EnvHtpasswd        = "BELAYPOINT_HTPASSWD" //nolint:gosec // G101: variable name, not a credential
 	EnvConfigDir       = "BELAYPOINT_CONFIG_DIR"
 	EnvMaxJobs         = "BELAYPOINT_MAX_JOBS"
 	EnvLockWait        = "BELAYPOINT_LOCK_WAIT"

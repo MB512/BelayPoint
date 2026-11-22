@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata" // embeds the time zone database: TZ works without /usr/share/zoneinfo
@@ -257,7 +258,12 @@ func healthcheck(ctx context.Context, getenv func(string) string, stderr io.Writ
 
 // certCmd implements "cert reset [--ca]".
 func certCmd(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "reset" || len(args) > 2 || (len(args) == 2 && args[1] != "--ca") {
+	var withCA bool
+	switch strings.Join(args, " ") {
+	case "reset":
+	case "reset --ca":
+		withCA = true
+	default:
 		fmt.Fprintln(stderr, "usage: belaypoint cert reset [--ca]")
 		return 2
 	}
@@ -266,7 +272,6 @@ func certCmd(args []string, getenv func(string) string, stdout, stderr io.Writer
 		fmt.Fprintf(stderr, "configuration error: %v\n", err)
 		return 1
 	}
-	withCA := len(args) == 2
 	if err := tlscert.Reset(filepath.Join(cfg.ConfigDir, "tls"), withCA); err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return 1

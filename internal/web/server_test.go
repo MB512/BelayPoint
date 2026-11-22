@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -19,7 +20,7 @@ func handler(caPEM []byte) http.Handler {
 }
 
 func get(h http.Handler, path string, header map[string]string) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil)
 	for k, v := range header {
 		r.Header.Set(k, v)
 	}
