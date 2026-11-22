@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/MB512/belaypoint/internal/auth"
+	"github.com/MB512/belaypoint/internal/htpasswd"
 	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/vault"
 )
@@ -147,6 +148,7 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 		Audit:         e.audit,
 		AuditLog:      e.audit,
 		Repos:         db,
+		Users:         &htpasswd.File{Path: filepath.Join(e.reposDir, ".htpasswd")},
 		Scanner:       e.scanner,
 		ReposDir:      e.reposDir,
 		Location:      time.UTC,

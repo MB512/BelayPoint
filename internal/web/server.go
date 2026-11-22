@@ -86,6 +86,7 @@ type Options struct {
 	Audit    Auditor
 	AuditLog AuditLog
 	Repos    RepoList
+	Users    Users
 	Scanner  Scanner
 	// ReposDir is the repository root (BELAYPOINT_REPOS_DIR).
 	ReposDir string
@@ -130,6 +131,12 @@ func New(opts Options) http.Handler {
 		r.Use(s.requireSession)
 		r.Get("/", s.home)
 		r.Post("/repos/rescan", s.rescan)
+		r.Get("/users", s.usersPage)
+		r.Post("/users/add", s.addUser)
+		r.Get("/users/reset", s.confirmUser("reset"))
+		r.Post("/users/reset", s.resetUser)
+		r.Get("/users/remove", s.confirmUser("remove"))
+		r.Post("/users/remove", s.removeUser)
 		r.Get("/audit", s.auditPage)
 		r.Post("/logout", s.logout)
 		r.Post("/seal", s.seal)
@@ -172,6 +179,8 @@ type page struct {
 	// overview
 	Repos    []repoRow
 	Scanning bool
+	// users pages
+	Users *usersData
 }
 
 func (s *server) render(w http.ResponseWriter, status int, name string, p page) {

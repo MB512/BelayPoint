@@ -241,11 +241,18 @@ Per repository the UI shows:
 
 ## Users (`.htpasswd`)
 
-- Listing, adding, resetting the password of, and removing users.
-- Hashes: bcrypt. New passwords are generated (shown once) or entered.
+- Listing, adding, resetting the password of, and removing users. Reset and
+  remove need a confirmation page.
+- Hashes: bcrypt (cost 10: the rest-server checks hashes on requests, so the
+  NAS CPU sets the limit). New passwords are generated (160 bits, shown once,
+  never stored or logged) or entered (12 to 72 bytes, bcrypt's limit).
+  Existing entries with other hash types are kept and flagged in the UI;
+  resetting the password replaces them with bcrypt.
+- Comments and blank lines in the file are kept. A missing file counts as no
+  users and is created on the first add.
 - Usernames: `^[a-z0-9][a-z0-9._-]{0,63}$`. With `--private-repos` a user can
   only access repositories below `/<username>/`; the UI shows the repositories
-  that belong to each user.
+  that belong to each user and the repositories without a user.
 - Writing: temp file in the same directory, `fsync`, `rename`, `fsync` of the
   directory. The directory, not the file, must be mounted (a single-file bind
   mount would keep pointing at the old inode after the rename).

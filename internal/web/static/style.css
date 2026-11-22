@@ -59,3 +59,8 @@ th { font-weight: 600; color: var(--muted); }
 .badge.bad { background: var(--error-bg); color: var(--danger); font-weight: 600; }
 tr.missing td { color: var(--muted); }
 button:disabled { opacity: .6; cursor: default; }
+h2 { font-size: 1.2rem; margin-top: 2rem; }
+.actions { white-space: nowrap; text-align: right; }
+.actions a { margin-left: .75rem; }
+a.danger { color: var(--danger); }
+code.secret { display: inline-block; padding: .5rem .75rem; font-size: 1.1rem; background: var(--card); border: 1px solid var(--line); border-radius: 6px; user-select: all; }

@@ -30,6 +30,7 @@ import (
 	"github.com/MB512/belaypoint/internal/auth"
 	"github.com/MB512/belaypoint/internal/buildinfo"
 	"github.com/MB512/belaypoint/internal/config"
+	"github.com/MB512/belaypoint/internal/htpasswd"
 	"github.com/MB512/belaypoint/internal/netguard"
 	"github.com/MB512/belaypoint/internal/repos"
 	"github.com/MB512/belaypoint/internal/store"
@@ -90,6 +91,13 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 		return 1
 	}
 	defer func() { _ = db.Close() }()
+
+	users := &htpasswd.File{Path: cfg.Htpasswd}
+	if list, err := users.Users(); err != nil {
+		logger.Warn("users file: user management is disabled until it is fixed", "err", err)
+	} else {
+		logger.Info("users file", "path", cfg.Htpasswd, "users", len(list))
+	}
 
 	scanner := &repos.Scanner{Root: cfg.ReposDir, Store: db, Logger: logger, Now: time.Now}
 	scanner.Start(ctx)
@@ -153,6 +161,7 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			Audit:         auditor{db, logger},
 			AuditLog:      db,
 			Repos:         db,
+			Users:         users,
 			Scanner:       rescanner{ctx, scanner},
 			ReposDir:      cfg.ReposDir,
 			Location:      cfg.Location,

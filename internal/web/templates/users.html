@@ -1,0 +1,40 @@
+{{template "top" .}}
+{{with .Users}}
+<p class="muted">Users of the rest-server (<code>.htpasswd</code>). With <code>--private-repos</code> a user can
+only access repositories below <code>/&lt;user&gt;/</code>. The rest-server picks up changes by itself
+within about 30 seconds.</p>
+{{if .Users}}
+<table>
+<thead><tr><th>User</th><th>Hash</th><th>Repositories</th><th></th></tr></thead>
+<tbody>
+{{range .Users}}<tr>
+<td><code>{{.Name}}</code></td>
+<td>{{if eq .Scheme "bcrypt"}}bcrypt{{else}}<span class="badge bad" title="weak or unknown hash type: reset the password to get a bcrypt hash">{{.Scheme}}</span>{{end}}</td>
+<td>{{range .Repos}}<code>{{.}}</code> {{else}}<span class="muted">none</span>{{end}}</td>
+<td class="actions"><a href="/users/reset?name={{.Name}}">Reset password</a> <a href="/users/remove?name={{.Name}}" class="danger">Remove</a></td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p>No users yet.</p>
+{{end}}
+{{if .Orphans}}
+<p class="warn">Repositories without a user (nobody can reach them through the rest-server):
+{{range .Orphans}}<code>{{.}}</code> {{end}}</p>
+{{end}}
+{{end}}
+<h2>Add user</h2>
+<form method="post" action="/users/add" class="stack">
+<input type="hidden" name="csrf_token" value="{{.CSRF}}">
+<label>User name
+<input name="name" required pattern="[a-z0-9][a-z0-9._\-]{0,63}" maxlength="64" autocomplete="off" spellcheck="false">
+<small>Lowercase letters, digits, <code>.</code>, <code>_</code>, <code>-</code>. Usually the name of the backed-up host.</small>
+</label>
+<label>Password
+<input type="password" name="password" minlength="12" maxlength="72" autocomplete="new-password">
+<small>Leave empty to generate a strong password (recommended); it is shown once.</small>
+</label>
+<button type="submit">Add user</button>
+</form>
+{{template "bottom" .}}

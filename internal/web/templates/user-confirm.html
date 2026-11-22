@@ -1,0 +1,19 @@
+{{template "top" .}}
+{{with .Users}}
+{{if eq .Action "reset"}}
+<p>Reset the password of <code>{{.User.Name}}</code>? A new password is generated and shown once.
+Clients using the old password fail until they are updated (after about 30 seconds).</p>
+{{else}}
+<p>Remove the user <code>{{.User.Name}}</code>? Clients using it can no longer reach the rest-server
+(after about 30 seconds).</p>
+{{if .User.Repos}}<p>Its repositories are <strong>not</strong> deleted: {{range .User.Repos}}<code>{{.}}</code> {{end}}</p>{{end}}
+{{end}}
+<form method="post" action="/users/{{.Action}}">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="name" value="{{.User.Name}}">
+<input type="hidden" name="confirm" value="yes">
+<button type="submit" class="danger">{{if eq .Action "reset"}}Reset password{{else}}Remove user{{end}}</button>
+<a href="/users">Cancel</a>
+</form>
+{{end}}
+{{template "bottom" .}}
