@@ -336,7 +336,18 @@ func TestRealUnlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != len(entries) || !strings.Contains(log.String(), "removed") {
-		t.Errorf("removed %d of %d, log %q", n, len(entries), log.String())
+	// Whether restic considers the lock stale depends on its version
+	// (older ones wait 30 minutes); what matters here is that the count
+	// matches what was removed.
+	after, _ := os.ReadDir(locks)
+	if n != len(entries)-len(after) {
+		t.Errorf("reported %d removed, but %d of %d are gone; log %q", n, len(entries)-len(after), len(entries), log.String())
+	}
+	// --remove-all removes the rest regardless of age.
+	if _, err := c.Unlock(ctx, dir, pw, true, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if rest, _ := os.ReadDir(locks); len(rest) != 0 {
+		t.Errorf("%d locks left after --remove-all", len(rest))
 	}
 }
