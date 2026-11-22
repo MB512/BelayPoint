@@ -35,6 +35,7 @@ import (
 	"github.com/MB512/belaypoint/internal/netguard"
 	"github.com/MB512/belaypoint/internal/repos"
 	"github.com/MB512/belaypoint/internal/restic"
+	"github.com/MB512/belaypoint/internal/scheduler"
 	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/tlscert"
 	"github.com/MB512/belaypoint/internal/vault"
@@ -136,6 +137,7 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 	var (
 		checker   web.Restic
 		jobRunner web.Jobs
+		schedule  web.Schedule
 		manager   *jobs.Manager
 	)
 	logDir := filepath.Join(cfg.ConfigDir, "jobs")
@@ -151,6 +153,12 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 		})
 		manager.Run(ctx)
 		checker, jobRunner = cli, manager
+		sched := scheduler.New(db, manager, logger, cfg.Location, time.Now, nil)
+		if err := sched.Start(ctx); err != nil {
+			logger.Error("scheduler", "err", err)
+			return 1
+		}
+		schedule = sched
 	}
 
 	var ips []netip.Addr
@@ -201,6 +209,8 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			JobList:       db,
 			JobLogDir:     logDir,
 			Policies:      db,
+			Plans:         db,
+			Schedule:      schedule,
 			ReposDir:      cfg.ReposDir,
 			Location:      cfg.Location,
 			SetupCode:     setupCode,

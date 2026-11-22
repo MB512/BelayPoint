@@ -351,7 +351,19 @@ expression):
    run `n+1/t`, so all data is read once every *t* runs (`t` default 7)
 
 Each step can be switched off. A failed step stops the plan; later steps do
-not run. Every step can also be started by hand.
+not run. The check rotation advances only after a successful check; `t = 0`
+checks the structure only. Every step can also be started by hand, and "Run
+plan now…" starts the whole plan (with confirmation).
+
+The plan is set on the repository page: schedule, steps and rotation, off by
+default. The schedule is a 5-field cron expression (minute hour day month
+weekday) or `@daily` / `@weekly` / `@monthly` in the container's time zone
+(`TZ`), with at least one hour between runs; `@every` is refused.
+`internal/scheduler` (robfig/cron) holds one entry per present repository
+with an enabled plan and reloads them when a plan is saved. At the scheduled
+time it queues the plan job; if the job is refused (vault sealed, no
+password, a job for the repository still queued or running), the run is
+recorded as a job with state `skipped` and the reason.
 
 ### Queue
 
@@ -375,7 +387,7 @@ not run. Every step can also be started by hand.
   minutes) and "all…" (`unlock --remove-all` on a page that warns and needs
   the repository name typed).
 - States: `queued`, `running`, `succeeded`, `failed`, `refused`,
-  `interrupted`. The "Jobs" page lists them, newest first.
+  `interrupted`, `skipped` (a scheduled run that could not start). The "Jobs" page lists them, newest first.
 - After a restart, jobs still marked as queued or running are set to
   `interrupted`; their lock is left to the stale-lock cleanup.
 

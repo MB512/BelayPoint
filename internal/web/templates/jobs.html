@@ -8,7 +8,7 @@
 <td class="nowrap">{{.Queued}}</td>
 <td><code>{{.Repo}}</code></td>
 <td class="nowrap">{{.Type}}{{if eq .Trigger "schedule"}} <span class="badge">scheduled</span>{{end}}</td>
-<td><span class="badge{{if or (eq .State "failed") (eq .State "refused") (eq .State "interrupted")}} bad{{end}}">{{.State}}</span></td>
+<td><span class="badge{{if or (eq .State "failed") (eq .State "refused") (eq .State "interrupted") (eq .State "skipped")}} bad{{end}}">{{.State}}</span></td>
 <td class="num">{{.Duration}}</td>
 <td>{{.Summary}}{{if .Error}}<code class="errtext">{{.Error}}</code>{{end}}</td>
 </tr>

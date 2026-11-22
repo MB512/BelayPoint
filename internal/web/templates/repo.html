@@ -9,12 +9,38 @@
 lock: a client backup that starts meanwhile waits for it (or fails without <code>--retry-lock</code>).
 Results are on the <a href="/jobs">Jobs</a> page.</p>
 <div class="buttons">
+<a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=maintenance" title="Run the steps of the maintenance plan now">Run plan now…</a>
 <a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=forget">Forget…</a>
 <a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=prune">Prune…</a>
 <form method="post" action="/repos/maintenance"><input type="hidden" name="csrf_token" value="{{$.CSRF}}">
 <input type="hidden" name="repo" value="{{.Path}}"><input type="hidden" name="job" value="check">
 <button type="submit" title="restic check: verifies the repository structure (reads no pack data)">Check</button></form>
 </div>
+{{end}}
+
+{{with .Plan}}
+<h2>Maintenance plan</h2>
+<p class="muted">{{if .Enabled}}{{if .Next}}Next run: <strong>{{.Next}}</strong>.{{else}}Enabled, but not scheduled (see the container log).{{end}}{{else}}Not scheduled.{{end}}
+The plan runs as one job: the enabled steps in this order; a failed step stops it. It runs only while the vault is
+unsealed; a run while sealed (or while another job for this repository runs) is recorded as skipped.</p>
+<form method="post" action="/repos/plan" class="stack plan">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="repo" value="{{$.Repo.Path}}">
+<label class="check"><input type="checkbox" name="enabled" value="yes" {{if .Enabled}}checked{{end}}> Run on a schedule</label>
+<label>Schedule <small>cron: minute hour day month weekday, in the container's time zone (TZ); e.g. <code>30 3 * * 0</code> = Sundays 03:30,
+<code>0 2 * * *</code> = daily 02:00, or <code>@weekly</code>. At least one hour between runs.</small>
+<input type="text" name="schedule" value="{{.Schedule}}" placeholder="30 3 * * 0" spellcheck="false" autocomplete="off"></label>
+<fieldset><legend>Steps</legend>
+<label class="check"><input type="checkbox" name="unlock" value="yes" {{if .Unlock}}checked{{end}}> unlock: remove stale locks</label>
+<label class="check"><input type="checkbox" name="forget" value="yes" {{if .Forget}}checked{{end}}> forget: apply the retention policy below</label>
+<label class="check"><input type="checkbox" name="prune" value="yes" {{if .Prune}}checked{{end}}> prune: delete unreferenced data</label>
+<label class="check"><input type="checkbox" name="check" value="yes" {{if .Check}}checked{{end}}> check: verify the repository</label>
+</fieldset>
+<label>Check reads all data once every <small>runs; each check reads the next part (<code>--read-data-subset n/t</code>). 0 = structure only.
+{{if .CheckSubsetT}}Next check reads part {{.CheckSubsetN}}/{{.CheckSubsetT}}.{{end}}</small>
+<input type="number" name="check_subset_t" min="0" max="365" value="{{.CheckSubsetT}}"></label>
+<button type="submit">Save plan</button>
+</form>
 {{end}}
 
 <h2>Retention policy</h2>

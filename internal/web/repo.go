@@ -35,6 +35,7 @@ type repoData struct {
 	Default     restic.Policy
 	// Preview is set after "Preview forget".
 	Preview *previewData
+	Plan    *planData
 }
 
 type previewData struct {
@@ -58,19 +59,36 @@ func (s *server) repoPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	p, custom, err := s.Policies.RepoPolicy(r.Context(), path)
+	d, err := s.repoData(r.Context(), path)
 	if err != nil {
-		s.Logger.Error("reading policy", "repo", path, "err", err)
-		http.Error(w, "reading the policy failed; see the container log", http.StatusInternalServerError)
+		s.Logger.Error("reading repository settings", "repo", path, "err", err)
+		http.Error(w, "reading the repository settings failed; see the container log", http.StatusInternalServerError)
 		return
 	}
-	s.renderRepo(w, r, http.StatusOK, &repoData{Path: path, Policy: p, Custom: custom}, "")
+	s.renderRepo(w, r, http.StatusOK, d, "")
+}
+
+// repoData loads the saved settings of a repository.
+func (s *server) repoData(ctx context.Context, path string) (*repoData, error) {
+	p, custom, err := s.Policies.RepoPolicy(ctx, path)
+	if err != nil {
+		return &repoData{Path: path}, err
+	}
+	return &repoData{Path: path, Policy: p, Custom: custom}, nil
 }
 
 func (s *server) renderRepo(w http.ResponseWriter, r *http.Request, status int, d *repoData, errMsg string) {
 	d.Owner = repos.Owner(d.Path)
 	d.Password = s.Vault.Has(vault.RepoSecret(d.Path))
 	d.Default = restic.DefaultPolicy
+	if d.Plan == nil {
+		plan, err := s.planFor(r.Context(), d.Path)
+		if err != nil {
+			s.Logger.Error("reading plan", "repo", d.Path, "err", err)
+			plan = &planData{}
+		}
+		d.Plan = plan
+	}
 	s.render(w, status, "repo.html", page{
 		Title: "Repository " + d.Path, CSRF: sessionFrom(r.Context()).CSRF, Error: errMsg,
 		Repo: d, JobsAvailable: s.Jobs != nil,
@@ -201,7 +219,7 @@ func (s *server) preview(groups []restic.ForgetGroup) *previewData {
 
 // maintenanceJobs are the jobs started from the repository page; the
 // destructive ones need a confirmation page (CLAUDE.md, hard rules).
-var maintenanceJobs = map[jobs.Type]bool{jobs.Forget: true, jobs.Prune: true, jobs.Check: false}
+var maintenanceJobs = map[jobs.Type]bool{jobs.Forget: true, jobs.Prune: true, jobs.Check: false, jobs.Maintenance: true}
 
 // maintenanceData is the data of the confirmation page.
 type maintenanceData struct {
@@ -209,6 +227,7 @@ type maintenanceData struct {
 	Job    string
 	Policy string // forget: the saved policy as restic arguments
 	Custom bool
+	Plan   string // maintenance: the enabled steps
 }
 
 func (s *server) maintenancePage(w http.ResponseWriter, r *http.Request) {
@@ -218,7 +237,16 @@ func (s *server) maintenancePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := &maintenanceData{Path: path, Job: string(typ)}
-	if typ == jobs.Forget {
+	if typ == jobs.Maintenance {
+		p, err := s.Plans.RepoPlan(r.Context(), path)
+		if err != nil {
+			s.Logger.Error("reading plan", "repo", path, "err", err)
+			http.Error(w, "reading the plan failed; see the container log", http.StatusInternalServerError)
+			return
+		}
+		d.Plan = planSteps(p)
+	}
+	if typ == jobs.Forget || typ == jobs.Maintenance {
 		p, custom, err := s.Policies.RepoPolicy(r.Context(), path)
 		if err != nil {
 			s.Logger.Error("reading policy", "repo", path, "err", err)

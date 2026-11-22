@@ -96,8 +96,11 @@ type Options struct {
 	Restic  Restic
 	Jobs    Jobs
 	JobList JobList
-	// Policies stores the retention policies.
+	// Policies stores the retention policies, Plans the maintenance plans;
+	// Schedule is the running scheduler (nil without restic).
 	Policies Policies
+	Plans    Plans
+	Schedule Schedule
 	// JobLogDir holds the job logs (<id>.log).
 	JobLogDir string
 	// ReposDir is the repository root (BELAYPOINT_REPOS_DIR).
@@ -149,6 +152,7 @@ func New(opts Options) http.Handler {
 		r.Post("/repos/snapshots", s.refreshSnapshots)
 		r.Get("/repos/view", s.repoPage)
 		r.Post("/repos/policy", s.setPolicy)
+		r.Post("/repos/plan", s.setPlan)
 		r.Post("/repos/forget-preview", s.previewForget)
 		r.Get("/repos/maintenance", s.maintenancePage)
 		r.Post("/repos/maintenance", s.startMaintenance)

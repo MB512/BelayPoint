@@ -186,6 +186,25 @@ func (f *fakeJobs) PreviewForget(_ context.Context, repo string, p restic.Policy
 	}}, nil
 }
 
+// fakeSchedule counts reloads.
+type fakeSchedule struct {
+	mu      sync.Mutex
+	reloads int
+}
+
+func (f *fakeSchedule) Reload(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reloads++
+	return nil
+}
+func (f *fakeSchedule) Next(repo string) time.Time {
+	if repo == "alice/main" {
+		return time.Date(2026, 11, 29, 3, 30, 0, 0, time.UTC)
+	}
+	return time.Time{}
+}
+
 func (f *fakeJobs) Busy(repo string) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.busy[repo] }
 
 func (v *fakeVault) Has(name string) bool {
@@ -203,6 +222,7 @@ type testEnv struct {
 	scanner  *fakeScanner
 	restic   *fakeRestic
 	jobs     *fakeJobs
+	schedule *fakeSchedule
 	reposDir string
 	logDir   string
 	opts     Options
@@ -219,7 +239,7 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 	t.Cleanup(func() { _ = db.Close() })
 	e := &testEnv{
 		vault: &fakeVault{}, audit: &recorder{}, limiter: auth.NewLimiter(time.Now),
-		store: db, scanner: &fakeScanner{}, restic: &fakeRestic{password: "repo secret"}, jobs: &fakeJobs{busy: map[string]bool{}}, logDir: t.TempDir(), reposDir: t.TempDir(),
+		store: db, scanner: &fakeScanner{}, restic: &fakeRestic{password: "repo secret"}, jobs: &fakeJobs{busy: map[string]bool{}}, logDir: t.TempDir(), schedule: &fakeSchedule{}, reposDir: t.TempDir(),
 	}
 	code := testSetupCode
 	if initialized {
@@ -243,6 +263,8 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 		JobList:       db,
 		JobLogDir:     e.logDir,
 		Policies:      db,
+		Plans:         db,
+		Schedule:      e.schedule,
 		ReposDir:      e.reposDir,
 		Location:      time.UTC,
 		SetupCode:     code,

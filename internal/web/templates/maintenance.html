@@ -1,6 +1,11 @@
 {{template "top" .}}
 {{with .Maintenance}}
-{{if eq .Job "forget"}}
+{{if eq .Job "maintenance"}}
+<p class="warn"><strong>This runs the maintenance plan of <code>{{.Path}}</code> now: {{.Plan}}.</strong>
+forget removes the snapshots the {{if .Custom}}repository's{{else}}default{{end}} retention policy (<code>{{.Policy}}</code>)
+does not keep, prune deletes the data no snapshot references; neither can be undone.</p>
+<p class="muted">Use "Preview" on the <a href="/repos/view?repo={{.Path}}">repository page</a> first to see which snapshots go.</p>
+{{else if eq .Job "forget"}}
 <p class="warn"><strong>forget removes the snapshots of <code>{{.Path}}</code> that the
 {{if .Custom}}repository's{{else}}default{{end}} retention policy does not keep.</strong>
 They cannot be restored afterwards. The backup clients write append-only, so BelayPoint is the only place where this happens.</p>
