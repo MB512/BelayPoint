@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 )
 
 // DefaultMaxUnused is passed to prune as --max-unused: up to this share of
@@ -23,29 +24,39 @@ func (c *CLI) lockArgs() []string {
 	return []string{"--retry-lock", c.RetryLock.String()}
 }
 
-// Forget removes the snapshots the policy does not keep (exclusive lock).
-// A readable summary goes to log; it returns restic's groups (kept and
-// removed snapshots).
-func (c *CLI) Forget(ctx context.Context, dir string, password []byte, p Policy, log io.Writer) ([]ForgetGroup, error) {
-	if err := p.Validate(); err != nil {
-		return nil, err
-	}
-	args := append(append([]string{"forget", "--json"}, c.lockArgs()...), p.Args()...)
-	var out bytes.Buffer
-	if err := c.run(ctx, dir, password, args, &out, log); err != nil {
-		return nil, err
-	}
-	groups, err := parseForget(out.Bytes())
+// Forget runs the passes of the policy (exclusive lock each): first the
+// tag rules, then the main policy. A readable summary goes to log. A failed
+// pass stops; the passes before it have already removed their snapshots.
+func (c *CLI) Forget(ctx context.Context, dir string, password []byte, p Policy, log io.Writer) ([]PassResult, error) {
+	passes, err := c.passes(ctx, dir, password, p)
 	if err != nil {
 		return nil, err
 	}
-	for _, g := range groups {
-		fmt.Fprintf(log, "group host=%s paths=%v: %d kept, %d removed\n", g.Host, g.Paths, len(g.Keep), len(g.Remove))
-		for _, s := range g.Remove {
-			fmt.Fprintf(log, "  removed %s %s\n", s.ShortID, s.Time.Format("2006-01-02 15:04:05"))
+	var results []PassResult
+	for _, pass := range passes {
+		name := "main policy"
+		if pass.Tag != "" {
+			name = "tag " + pass.Tag
 		}
+		fmt.Fprintf(log, "forget pass %s: %s\n", name, strings.Join(pass.Args, " "))
+		args := append(append([]string{"forget", "--json"}, c.lockArgs()...), pass.Args...)
+		var out bytes.Buffer
+		if err := c.run(ctx, dir, password, args, &out, log); err != nil {
+			return results, err
+		}
+		groups, err := parseForget(out.Bytes())
+		if err != nil {
+			return results, err
+		}
+		for _, g := range groups {
+			fmt.Fprintf(log, "  group host=%s paths=%v: %d kept, %d removed\n", g.Host, g.Paths, len(g.Keep), len(g.Remove))
+			for _, s := range g.Remove {
+				fmt.Fprintf(log, "    removed %s %s %v\n", s.ShortID, s.Time.Format("2006-01-02 15:04:05"), s.Tags)
+			}
+		}
+		results = append(results, PassResult{Tag: pass.Tag, Groups: groups})
 	}
-	return groups, nil
+	return results, nil
 }
 
 // Prune removes data no snapshot references (exclusive lock). restic's

@@ -52,10 +52,10 @@ type Runner interface {
 	Unlock(ctx context.Context, dir string, password []byte, removeAll bool, log io.Writer) (int, error)
 	// ForgetPreview shows what forget with the policy would remove,
 	// without changing anything.
-	ForgetPreview(ctx context.Context, dir string, password []byte, p Policy) ([]ForgetGroup, error)
+	ForgetPreview(ctx context.Context, dir string, password []byte, p Policy) ([]PassResult, error)
 	// Forget, Prune and Check take an exclusive lock and wait up to
 	// RetryLock for other locks. Their output goes to log.
-	Forget(ctx context.Context, dir string, password []byte, p Policy, log io.Writer) ([]ForgetGroup, error)
+	Forget(ctx context.Context, dir string, password []byte, p Policy, log io.Writer) ([]PassResult, error)
 	Prune(ctx context.Context, dir string, password []byte, maxUnused string, log io.Writer) error
 	Check(ctx context.Context, dir string, password []byte, subset string, log io.Writer) error
 }

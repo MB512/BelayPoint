@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -356,25 +357,73 @@ func TestPolicy(t *testing.T) {
 	if err := DefaultPolicy.Validate(); err != nil {
 		t.Errorf("default policy: %v", err)
 	}
-	want := "--group-by host,paths --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 3"
-	if got := strings.Join(DefaultPolicy.Args(), " "); got != want {
-		t.Errorf("args = %q", got)
+	snaps := []Snapshot{
+		{ShortID: "1", Tags: []string{"pre-stop"}}, {ShortID: "2", Tags: []string{"final"}},
+		{ShortID: "3"}, {ShortID: "4", Tags: []string{"pre-restore"}}, {ShortID: "5", Tags: []string{"b", "a"}},
 	}
-	p := Policy{KeepLast: 2, KeepWithin: "1y6m"}
-	if got := strings.Join(p.Args(), " "); got != "--group-by host,paths --keep-last 2 --keep-within 1y6m" {
-		t.Errorf("args = %q", got)
+	passes, err := DefaultPolicy.Passes(snaps)
+	if err != nil {
+		t.Fatal(err)
 	}
+	var got []string
+	for _, p := range passes {
+		got = append(got, p.Tag+"|"+strings.Join(p.Args, " "))
+	}
+	want := []string{
+		"pre-stop|--group-by host,paths --tag pre-stop --keep-last 2",
+		"|--group-by host,paths --tag  --tag a,b --tag final --tag pre-restore --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 3",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("passes:\n%s", strings.Join(got, "\n"))
+	}
+	// Only pre-stop snapshots: no main pass.
+	if passes, _ := DefaultPolicy.Passes(snaps[:1]); len(passes) != 1 || passes[0].Tag != "pre-stop" {
+		t.Errorf("passes = %+v", passes)
+	}
+	// A rule snapshot that also carries "final" would be selected twice.
+	overlap := append(slices.Clone(snaps), Snapshot{ShortID: "6", Tags: []string{"final", "pre-stop"}})
+	if _, err := DefaultPolicy.Passes(overlap); !errors.Is(err, ErrTagOverlap) {
+		t.Errorf("overlap: %v", err)
+	}
+	if s := DefaultPolicy.String(); s != "--keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 3; tag pre-stop: --keep-last 2" {
+		t.Errorf("string = %q", s)
+	}
+	p := Policy{Keep: Keep{KeepLast: 2, KeepWithin: "1y6m"}}
+	if passes, _ := p.Passes(nil); len(passes) != 1 || strings.Join(passes[0].Args, " ") != "--group-by host,paths --keep-last 2 --keep-within 1y6m" {
+		t.Errorf("passes = %+v", passes)
+	}
+	daily := Keep{KeepDaily: 1}
 	for _, bad := range []Policy{
 		{},
-		{KeepDaily: -1},
-		{KeepDaily: MaxKeep + 1},
-		{KeepWithin: "14 days"},
-		{KeepWithin: "1y; rm -rf /"},
-		{KeepWithin: "--keep-last=1"},
+		{Keep: Keep{KeepDaily: -1}},
+		{Keep: Keep{KeepDaily: MaxKeep + 1}},
+		{Keep: Keep{KeepWithin: "14 days"}},
+		{Keep: Keep{KeepWithin: "1y; rm -rf /"}},
+		{Keep: Keep{KeepWithin: "--keep-last=1"}},
+		{Keep: daily, TagRules: []TagRule{{Tag: "pre-stop"}}},           // empty rule
+		{Keep: daily, TagRules: []TagRule{{Tag: "a,b", Keep: daily}}},   // tag list
+		{Keep: daily, TagRules: []TagRule{{Tag: "--tag", Keep: daily}}}, // option
+		{Keep: daily, TagRules: []TagRule{{Tag: "", Keep: daily}}},      // empty tag
+		{Keep: daily, TagRules: []TagRule{{Tag: "x", Keep: daily}, {Tag: "x", Keep: daily}}}, // twice
+		{Keep: daily, TagRules: []TagRule{{Tag: "x", Keep: Keep{KeepWithin: "soon"}}}},       // bad within
+		{Keep: daily, TagRules: make([]TagRule, MaxTagRules+1)},                              // too many
 	} {
 		if err := bad.Validate(); !errors.Is(err, ErrPolicy) {
 			t.Errorf("%+v accepted: %v", bad, err)
 		}
+	}
+}
+
+func TestResultHelpers(t *testing.T) {
+	results := []PassResult{
+		{Tag: "pre-stop", Groups: []ForgetGroup{{Keep: make([]Snapshot, 2), Remove: make([]Snapshot, 3)}}},
+		{Groups: []ForgetGroup{{Keep: make([]Snapshot, 4), Remove: make([]Snapshot, 1)}, {Keep: make([]Snapshot, 1)}}},
+	}
+	if Removed(results) != 4 || len(Kept(results)) != 7 {
+		t.Errorf("removed %d, kept %d", Removed(results), len(Kept(results)))
+	}
+	if g, err := parseForget([]byte("\n")); g != nil || err != nil {
+		t.Errorf("empty output: %v %v", g, err)
 	}
 }
 
@@ -399,12 +448,12 @@ func TestRealForgetPreview(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	groups, err := c.ForgetPreview(ctx, dir, pw, Policy{KeepLast: 1})
+	res, err := c.ForgetPreview(ctx, dir, pw, Policy{Keep: Keep{KeepLast: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(groups) != 1 || len(groups[0].Keep) != 1 || len(groups[0].Remove) != 2 || groups[0].Host == "" {
-		t.Fatalf("groups = %+v", groups)
+	if len(res) != 1 || len(res[0].Groups) != 1 || len(Kept(res)) != 1 || Removed(res) != 2 || res[0].Groups[0].Host == "" {
+		t.Fatalf("result = %+v", res)
 	}
 	// Dry run: all three are still there, and no lock was left.
 	if list, _ := c.Snapshots(ctx, dir, pw); len(list) != 3 {
@@ -437,9 +486,9 @@ func TestRealMaintenance(t *testing.T) {
 		}
 	}
 	var log bytes.Buffer
-	groups, err := c.Forget(ctx, dir, pw, Policy{KeepLast: 1}, &log)
-	if err != nil || len(groups) != 1 || len(groups[0].Remove) != 2 || !strings.Contains(log.String(), "1 kept, 2 removed") {
-		t.Fatalf("forget: %+v %v\n%s", groups, err, log.String())
+	res, err := c.Forget(ctx, dir, pw, Policy{Keep: Keep{KeepLast: 1}}, &log)
+	if err != nil || Removed(res) != 2 || !strings.Contains(log.String(), "1 kept, 2 removed") {
+		t.Fatalf("forget: %+v %v\n%s", res, err, log.String())
 	}
 	if list, _ := c.Snapshots(ctx, dir, pw); len(list) != 1 {
 		t.Errorf("%d snapshots left", len(list))
@@ -480,7 +529,7 @@ func TestRealMaintenance(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	start := time.Now()
-	_, err = c.Forget(ctx, dir, pw, Policy{KeepLast: 1}, io.Discard)
+	_, err = c.Forget(ctx, dir, pw, Policy{Keep: Keep{KeepLast: 1}}, io.Discard)
 	if !errors.Is(err, ErrLocked) {
 		t.Errorf("forget during a backup: %v (%s)", err, mustVersion(t, c))
 	}
@@ -523,4 +572,66 @@ func stableDir(t *testing.T, dir string) []os.DirEntry {
 		prev = cur
 	}
 	return prev
+}
+
+// TestRealTagRules mimics StackBelay: each backup is a pre-stop snapshot
+// followed by a final one. The pre-stop rule keeps the newest pre-stop
+// snapshot; the main policy (keep last 2) must neither count nor remove
+// pre-stop snapshots.
+func TestRealTagRules(t *testing.T) {
+	if _, err := exec.LookPath("restic"); err != nil {
+		t.Skip("restic not installed")
+	}
+	c, err := New(t.TempDir(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "repo")
+	data := t.TempDir()
+	pw := []byte("pw")
+	if err := c.run(ctx, dir, pw, []string{"init"}, io.Discard, nil); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		_ = os.WriteFile(filepath.Join(data, "f"), []byte(strconv.Itoa(i)), 0o600)
+		for _, tag := range []string{"pre-stop", "final"} {
+			if err := c.run(ctx, dir, pw, []string{"backup", "--tag", tag, data}, io.Discard, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	p := Policy{Keep: Keep{KeepLast: 2}, TagRules: []TagRule{{Tag: TagPreStop, Keep: Keep{KeepLast: 1}}}}
+	// A tag without snapshots: restic prints nothing, the pass is empty.
+	p2 := Policy{Keep: Keep{KeepLast: 2}, TagRules: []TagRule{{Tag: "pre-restore", Keep: Keep{KeepLast: 1}}}}
+	if res, err := c.ForgetPreview(ctx, dir, pw, p2); err != nil || len(res) != 2 || len(res[0].Groups) != 0 || Removed(res) != 4 {
+		t.Fatalf("tag without snapshots: %+v %v", res, err)
+	}
+	preview, err := c.ForgetPreview(ctx, dir, pw, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Removed(preview) != 3 { // 2 pre-stop + 1 final
+		t.Errorf("preview removes %d, want 3: %+v", Removed(preview), preview)
+	}
+	var log bytes.Buffer
+	res, err := c.Forget(ctx, dir, pw, p, &log)
+	if err != nil {
+		t.Fatalf("forget: %v\n%s", err, log.String())
+	}
+	if Removed(res) != 3 {
+		t.Errorf("removed %d\n%s", Removed(res), log.String())
+	}
+	list, _ := c.Snapshots(ctx, dir, pw)
+	count := map[string]int{}
+	for _, s := range list {
+		count[strings.Join(s.Tags, ",")]++
+	}
+	if count["pre-stop"] != 1 || count["final"] != 2 || len(list) != 3 {
+		// keep last 2 applies to the final snapshots only
+		t.Errorf("left: %v", count)
+	}
+	if len(Kept(res)) != 3 {
+		t.Errorf("kept = %d, want all 3 remaining", len(Kept(res)))
+	}
 }
