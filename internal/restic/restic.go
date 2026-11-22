@@ -50,6 +50,9 @@ type Runner interface {
 	// those of running backups). restic's output goes to log. It returns
 	// the number of removed locks.
 	Unlock(ctx context.Context, dir string, password []byte, removeAll bool, log io.Writer) (int, error)
+	// ForgetPreview shows what forget with the policy would remove,
+	// without changing anything.
+	ForgetPreview(ctx context.Context, dir string, password []byte, p Policy) ([]ForgetGroup, error)
 }
 
 // Error is a failed restic run.

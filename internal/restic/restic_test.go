@@ -351,3 +351,66 @@ func TestRealUnlock(t *testing.T) {
 		t.Errorf("%d locks left after --remove-all", len(rest))
 	}
 }
+
+func TestPolicy(t *testing.T) {
+	if err := DefaultPolicy.Validate(); err != nil {
+		t.Errorf("default policy: %v", err)
+	}
+	want := "--group-by host,paths --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 3"
+	if got := strings.Join(DefaultPolicy.Args(), " "); got != want {
+		t.Errorf("args = %q", got)
+	}
+	p := Policy{KeepLast: 2, KeepWithin: "1y6m"}
+	if got := strings.Join(p.Args(), " "); got != "--group-by host,paths --keep-last 2 --keep-within 1y6m" {
+		t.Errorf("args = %q", got)
+	}
+	for _, bad := range []Policy{
+		{},
+		{KeepDaily: -1},
+		{KeepDaily: MaxKeep + 1},
+		{KeepWithin: "14 days"},
+		{KeepWithin: "1y; rm -rf /"},
+		{KeepWithin: "--keep-last=1"},
+	} {
+		if err := bad.Validate(); !errors.Is(err, ErrPolicy) {
+			t.Errorf("%+v accepted: %v", bad, err)
+		}
+	}
+}
+
+func TestRealForgetPreview(t *testing.T) {
+	if _, err := exec.LookPath("restic"); err != nil {
+		t.Skip("restic not installed")
+	}
+	c, err := New(t.TempDir(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "repo")
+	data := t.TempDir()
+	_ = os.WriteFile(filepath.Join(data, "f"), []byte("x"), 0o600)
+	pw := []byte("pw")
+	if err := c.run(ctx, dir, pw, []string{"init"}, io.Discard, nil); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if err := c.run(ctx, dir, pw, []string{"backup", data}, io.Discard, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	groups, err := c.ForgetPreview(ctx, dir, pw, Policy{KeepLast: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || len(groups[0].Keep) != 1 || len(groups[0].Remove) != 2 || groups[0].Host == "" {
+		t.Fatalf("groups = %+v", groups)
+	}
+	// Dry run: all three are still there, and no lock was left.
+	if list, _ := c.Snapshots(ctx, dir, pw); len(list) != 3 {
+		t.Errorf("%d snapshots after the preview", len(list))
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dir, "locks")); len(entries) != 0 {
+		t.Errorf("%d locks after the preview", len(entries))
+	}
+}
