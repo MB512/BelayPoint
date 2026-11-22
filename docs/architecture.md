@@ -194,7 +194,8 @@ key check. Consequences:
 Sessions are kept in memory only; a restart logs everybody out.
 
 A repository password is entered once per repository in the UI and checked
-with `restic cat config` before it is stored. Optionally BelayPoint can add a
+with `restic cat config` before it is stored. Leading and trailing whitespace
+is removed, as restic does for `--password-file` (issue #3). Optionally BelayPoint can add a
 dedicated key with `restic key add`, so the client's password is not needed
 after that and BelayPoint's access can be revoked separately.
 
@@ -225,8 +226,11 @@ Per repository the UI shows:
 - Writing: temp file in the same directory, `fsync`, `rename`, `fsync` of the
   directory. The directory, not the file, must be mounted (a single-file bind
   mount would keep pointing at the old inode after the rename).
-- BelayPoint does not signal the rest-server (no Docker socket); the
-  rest-server must pick up the changed file by itself.
+- BelayPoint does not signal the rest-server (no Docker socket). The
+  rest-server picks up the change by itself: on requests it checks the file's
+  modification time and size at most every 30 s and reloads it; a file it
+  cannot parse is ignored and the old users stay active (issue #1). The UI
+  says that a change can take up to about 30 s.
 - Removing a user does not touch its repositories.
 
 ## Maintenance jobs
@@ -239,14 +243,14 @@ Job types (all run `restic` with the local backend `-r /repos/<path>`,
 | `unlock` | `unlock` (stale locks only) | – |
 | `unlock-all` | `unlock --remove-all` (manual only, typed confirmation) | – |
 | `forget` | `forget` with the repository's retention policy | exclusive |
-| `forget-preview` | `forget --dry-run` | – (read only) |
+| `forget-preview` | `forget --dry-run --no-lock` | none (without `--no-lock` even the dry run takes an exclusive lock) |
 | `prune` | `prune --max-unused <policy>` | exclusive |
 | `check` | `check --read-data-subset=<n>/<t>` | exclusive |
 | `snapshots` | `snapshots` (refresh of the cached snapshot list) | shared |
 
 `check`, `forget` and `prune` take exclusive locks: they cannot run while a
 client backs up, and client backups wait (or fail) while they run. Both sides
-use `--retry-lock`.
+use `--retry-lock` (issue #2).
 
 ### Maintenance plan
 
