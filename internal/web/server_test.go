@@ -156,6 +156,7 @@ func (f *fakeRestic) CatConfig(_ context.Context, dir string, pw []byte) error {
 type fakeJobs struct {
 	mu        sync.Mutex
 	submitted []string
+	previews  []string
 	busy      map[string]bool
 	err       error
 }
@@ -168,6 +169,21 @@ func (f *fakeJobs) Submit(_ context.Context, repo string, typ jobs.Type, _ jobs.
 	}
 	f.submitted = append(f.submitted, string(typ)+" "+repo)
 	return int64(len(f.submitted)), nil
+}
+
+func (f *fakeJobs) PreviewForget(_ context.Context, repo string, p restic.Policy) ([]restic.ForgetGroup, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.previews = append(f.previews, repo+" "+strings.Join(p.Args(), " "))
+	t0 := time.Date(2026, 11, 1, 3, 0, 0, 0, time.UTC)
+	return []restic.ForgetGroup{{
+		Host: "pc<1>", Paths: []string{"/home"},
+		Keep:   []restic.Snapshot{{ShortID: "keep0001", Time: t0}},
+		Remove: []restic.Snapshot{{ShortID: "gone0001", Time: t0}, {ShortID: "gone0002", Time: t0, Tags: []string{"daily"}}},
+	}}, nil
 }
 
 func (f *fakeJobs) Busy(repo string) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.busy[repo] }
@@ -226,6 +242,7 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 		Jobs:          e.jobs,
 		JobList:       db,
 		JobLogDir:     e.logDir,
+		Policies:      db,
 		ReposDir:      e.reposDir,
 		Location:      time.UTC,
 		SetupCode:     code,

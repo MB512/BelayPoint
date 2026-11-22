@@ -27,6 +27,7 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 var templates = template.Must(template.New("").Funcs(template.FuncMap{
+	"add": func(a, b int) int { return a + b },
 	"active": func(title, want string) string {
 		if title == want {
 			return "page"
@@ -95,6 +96,8 @@ type Options struct {
 	Restic  Restic
 	Jobs    Jobs
 	JobList JobList
+	// Policies stores the retention policies.
+	Policies Policies
 	// JobLogDir holds the job logs (<id>.log).
 	JobLogDir string
 	// ReposDir is the repository root (BELAYPOINT_REPOS_DIR).
@@ -144,6 +147,9 @@ func New(opts Options) http.Handler {
 		r.Post("/repos/password", s.setRepoPassword)
 		r.Post("/repos/password/remove", s.forgetRepoPassword)
 		r.Post("/repos/snapshots", s.refreshSnapshots)
+		r.Get("/repos/view", s.repoPage)
+		r.Post("/repos/policy", s.setPolicy)
+		r.Post("/repos/forget-preview", s.previewForget)
 		r.Post("/repos/unlock", s.unlock)
 		r.Get("/repos/unlock-all", s.unlockAllPage)
 		r.Post("/repos/unlock-all", s.unlockAll)
@@ -210,6 +216,8 @@ type page struct {
 	Jobs          []jobRow
 	JobsAvailable bool
 	Log           *logData
+	// repository page
+	Repo *repoData
 }
 
 func (s *server) render(w http.ResponseWriter, status int, name string, p page) {

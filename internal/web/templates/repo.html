@@ -1,0 +1,49 @@
+{{template "top" .}}
+{{with .Repo}}
+<p>User {{.Owner}}. Password: {{if .Password}}stored{{else}}<strong>not set</strong>{{end}}
+(<a href="/repos/password?repo={{.Path}}">{{if .Password}}change{{else}}set{{end}}</a>).</p>
+
+<h2>Retention policy</h2>
+<p class="muted">{{if .Custom}}This repository has its own policy.{{else}}The default policy applies.{{end}}
+Snapshots are grouped by host and paths: every client and every backup set keeps its own history.
+A snapshot is kept if any rule matches. Empty fields are not used.</p>
+<form method="post" class="stack policy">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="repo" value="{{.Path}}">
+<div class="grid">
+<label>Last <small>newest n</small><input type="number" name="keep_last" min="0" value="{{if .Policy.KeepLast}}{{.Policy.KeepLast}}{{end}}"></label>
+<label>Hourly<input type="number" name="keep_hourly" min="0" value="{{if .Policy.KeepHourly}}{{.Policy.KeepHourly}}{{end}}"></label>
+<label>Daily<input type="number" name="keep_daily" min="0" value="{{if .Policy.KeepDaily}}{{.Policy.KeepDaily}}{{end}}"></label>
+<label>Weekly<input type="number" name="keep_weekly" min="0" value="{{if .Policy.KeepWeekly}}{{.Policy.KeepWeekly}}{{end}}"></label>
+<label>Monthly<input type="number" name="keep_monthly" min="0" value="{{if .Policy.KeepMonthly}}{{.Policy.KeepMonthly}}{{end}}"></label>
+<label>Yearly<input type="number" name="keep_yearly" min="0" value="{{if .Policy.KeepYearly}}{{.Policy.KeepYearly}}{{end}}"></label>
+<label>Within <small>e.g. 14d, 6m, 1y6m</small><input type="text" name="keep_within" value="{{.Policy.KeepWithin}}" pattern="([0-9]+[ymdh])+"></label>
+</div>
+<div class="buttons">
+{{if $.JobsAvailable}}<button type="submit" formaction="/repos/forget-preview" title="forget --dry-run: shows what would be removed, changes nothing">Preview</button>{{end}}
+<button type="submit" formaction="/repos/policy">Save policy</button>
+{{if .Custom}}<button type="submit" formaction="/repos/policy" name="reset" value="yes" class="link" formnovalidate>Reset to default</button>{{end}}
+</div>
+</form>
+<p class="muted">Default: daily {{.Default.KeepDaily}}, weekly {{.Default.KeepWeekly}}, monthly {{.Default.KeepMonthly}}, yearly {{.Default.KeepYearly}}.</p>
+
+{{with .Preview}}
+<h2>Preview</h2>
+<p>With this policy, <strong>{{.Remove}} of {{add .Keep .Remove}} snapshots would be removed</strong> and {{.Keep}} kept.
+Nothing has been changed. The space is only freed by a later prune.</p>
+{{range .Groups}}
+<h3><code>{{.Host}}</code> {{.Paths}}</h3>
+<p>{{len .Keep}} kept, {{len .Remove}} removed.</p>
+{{if .Remove}}<details open><summary>Removed</summary>
+<table><thead><tr><th>Snapshot</th><th>Time</th><th>Tags</th></tr></thead><tbody>
+{{range .Remove}}<tr><td><code>{{.ID}}</code></td><td class="nowrap">{{.Time}}</td><td>{{.Tags}}</td></tr>{{end}}
+</tbody></table></details>{{end}}
+<details><summary>Kept</summary>
+<table><thead><tr><th>Snapshot</th><th>Time</th><th>Tags</th></tr></thead><tbody>
+{{range .Keep}}<tr><td><code>{{.ID}}</code></td><td class="nowrap">{{.Time}}</td><td>{{.Tags}}</td></tr>{{end}}
+</tbody></table></details>
+{{end}}
+{{end}}
+{{end}}
+<p><a href="/">Back to the overview</a></p>
+{{template "bottom" .}}

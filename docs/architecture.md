@@ -313,6 +313,20 @@ SIGINT, so restic removes its own lock; restic is killed only if it has not
 exited after 30 seconds. Read-only commands (`cat config`, `snapshots`) run
 with `--no-lock`.
 
+### Retention policy and preview
+
+Each repository has a page (path link in the overview) with its retention
+policy: keep last / hourly / daily / weekly / monthly / yearly and keep
+within (a restic duration such as `14d` or `1y6m`), grouped by host and
+paths. Without an own policy the default applies: daily 7, weekly 4,
+monthly 12, yearly 3. A policy without any rule is refused (restic would keep
+everything). Values are validated and passed as separate arguments.
+
+"Preview" runs `forget --dry-run --no-lock` with the values in the form,
+without saving them, and lists per group which snapshots would be kept and
+removed. It runs right away, outside the job queue: it is read-only and takes
+no lock, so it cannot conflict with jobs or client backups.
+
 ### Maintenance plan
 
 Per repository one plan, run as **one job** in a maintenance window (cron

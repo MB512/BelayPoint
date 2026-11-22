@@ -200,6 +200,7 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			Jobs:          jobRunner,
 			JobList:       db,
 			JobLogDir:     logDir,
+			Policies:      db,
 			ReposDir:      cfg.ReposDir,
 			Location:      cfg.Location,
 			SetupCode:     setupCode,

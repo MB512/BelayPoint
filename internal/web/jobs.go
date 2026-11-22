@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/MB512/belaypoint/internal/jobs"
+	"github.com/MB512/belaypoint/internal/restic"
 	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/vault"
 )
@@ -22,6 +23,7 @@ import (
 type Jobs interface {
 	Submit(ctx context.Context, repo string, typ jobs.Type, trigger jobs.Trigger) (int64, error)
 	Busy(repo string) bool
+	PreviewForget(ctx context.Context, repo string, p restic.Policy) ([]restic.ForgetGroup, error)
 }
 
 // JobList reads the job history (implemented by *store.Store).
