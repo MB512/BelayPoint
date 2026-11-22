@@ -26,6 +26,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/MB512/belaypoint/internal/atomicfile"
 )
 
 // File names inside the TLS directory.
@@ -319,41 +321,10 @@ func writePair(certPath, keyPath string, der []byte, key *ecdsa.PrivateKey) erro
 	if err != nil {
 		return fmt.Errorf("encoding key: %w", err)
 	}
-	if err := writeAtomic(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: kd}), 0o600); err != nil {
+	if err := atomicfile.Write(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: kd}), 0o600); err != nil {
 		return err
 	}
-	return writeAtomic(certPath, pemCert(der), 0o644)
-}
-
-func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
-	}
-	ok := false
-	defer func() {
-		if !ok {
-			_ = tmp.Close()
-			_ = os.Remove(tmp.Name())
-		}
-	}()
-	if err := tmp.Chmod(mode); err != nil {
-		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
-	}
-	if err := tmp.Sync(); err != nil {
-		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
-	}
-	ok = true
-	return nil
+	return atomicfile.Write(certPath, pemCert(der), 0o644)
 }
 
 func pemCert(der []byte) []byte {

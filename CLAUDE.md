@@ -64,6 +64,7 @@ exclusive job per repository, globally limited by `BELAYPOINT_MAX_JOBS`.
 
 ```
 cmd/belaypoint/     entrypoint: serve (default), healthcheck, cert reset
+internal/atomicfile/ atomic file replace (temp file, fsync, rename, dir fsync)
 internal/config/    env parsing and validation
 internal/netguard/  listener wrapper: source-address allowlist, CF header check
 internal/tlscert/   local CA + server certificate, SAN check, renewal
