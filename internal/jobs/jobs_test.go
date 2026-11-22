@@ -70,6 +70,13 @@ func newRunner(block bool) *fakeRunner {
 
 func (f *fakeRunner) CatConfig(context.Context, string, []byte) error { return nil }
 
+func (f *fakeRunner) ForgetPreview(_ context.Context, dir string, pw []byte, p restic.Policy) ([]restic.ForgetGroup, error) {
+	f.mu.Lock()
+	f.seenPW = append(f.seenPW, string(pw))
+	f.mu.Unlock()
+	return []restic.ForgetGroup{{Host: dir, Keep: make([]restic.Snapshot, p.KeepLast), Remove: make([]restic.Snapshot, 1)}}, nil
+}
+
 // Unlock echoes the password into the log, to check redaction.
 func (f *fakeRunner) Unlock(_ context.Context, _ string, pw []byte, removeAll bool, log io.Writer) (int, error) {
 	f.mu.Lock()
@@ -386,6 +393,27 @@ func TestUnlockJobLog(t *testing.T) {
 		if bytes.Contains(data, []byte("pw-alice")) || !strings.Contains(log, "password was [redacted]") ||
 			!strings.Contains(log, "succeeded: "+want) || !strings.Contains(log, string(typ)+" alice/main") {
 			t.Errorf("%s log:\n%s", typ, log)
+		}
+	}
+}
+
+func TestPreviewForget(t *testing.T) {
+	e := newEnv(t, false, 1)
+	ctx := context.Background()
+	groups, err := e.m.PreviewForget(ctx, "alice/main", restic.Policy{KeepLast: 2})
+	if err != nil || len(groups) != 1 || len(groups[0].Keep) != 2 || !strings.HasSuffix(groups[0].Host, "alice/main") {
+		t.Fatalf("preview = %+v, %v", groups, err)
+	}
+	if _, err := e.m.PreviewForget(ctx, "dave/main", restic.DefaultPolicy); !errors.Is(err, ErrNoPassword) {
+		t.Errorf("no password: %v", err)
+	}
+	e.secrets.seal()
+	if _, err := e.m.PreviewForget(ctx, "alice/main", restic.DefaultPolicy); !errors.Is(err, ErrSealed) {
+		t.Errorf("sealed: %v", err)
+	}
+	for _, c := range e.secrets.given {
+		if strings.Trim(string(c), "\x00") != "" {
+			t.Errorf("password copy not zeroed: %q", c)
 		}
 	}
 }

@@ -209,6 +209,28 @@ func (m *Manager) Submit(ctx context.Context, repo string, typ Type, trigger Tri
 	return id, nil
 }
 
+// PreviewForget shows what forget with the policy would remove. It runs
+// right away, outside the queue: it is read-only and takes no lock
+// (--no-lock), so it cannot conflict with jobs or backups.
+func (m *Manager) PreviewForget(ctx context.Context, repo string, p restic.Policy) ([]restic.ForgetGroup, error) {
+	if m.secrets.Sealed() {
+		return nil, ErrSealed
+	}
+	pw, err := m.secrets.Secret(vault.RepoSecret(repo))
+	if errors.Is(err, vault.ErrNotFound) {
+		return nil, ErrNoPassword
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer clear(pw)
+	dir, err := repos.Dir(m.root, repo)
+	if err != nil {
+		return nil, err
+	}
+	return m.runner.ForgetPreview(ctx, dir, pw, p)
+}
+
 // run executes one job. The password is fetched only now, so a job that
 // waited in the queue while the vault was sealed is refused.
 func (m *Manager) run(ctx context.Context, t task) {
