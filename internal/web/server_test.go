@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/MB512/belaypoint/internal/auth"
 	"github.com/MB512/belaypoint/internal/htpasswd"
+	"github.com/MB512/belaypoint/internal/restic"
 	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/vault"
 )
@@ -26,6 +28,7 @@ type fakeVault struct {
 	password []byte // nil: not initialized
 	sealed   bool
 	secrets  []string // names for Has
+	values   map[string][]byte
 	// seen are the password slices passed in, to check they get zeroed.
 	seen [][]byte
 }
@@ -104,6 +107,50 @@ func (f *fakeScanner) Rescan() bool {
 
 func (f *fakeScanner) Scanning() bool { return false }
 
+func (v *fakeVault) SetSecret(name string, value []byte) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.sealed {
+		return vault.ErrSealed
+	}
+	if v.values == nil {
+		v.values = map[string][]byte{}
+	}
+	v.values[name] = bytes.Clone(value)
+	v.seen = append(v.seen, value)
+	if !slices.Contains(v.secrets, name) {
+		v.secrets = append(v.secrets, name)
+	}
+	return nil
+}
+
+func (v *fakeVault) DeleteSecret(name string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	delete(v.values, name)
+	v.secrets = slices.DeleteFunc(v.secrets, func(n string) bool { return n == name })
+	return nil
+}
+
+// fakeRestic accepts one password for every repository.
+type fakeRestic struct {
+	mu       sync.Mutex
+	password string
+	dirs     []string
+	seen     [][]byte
+}
+
+func (f *fakeRestic) CatConfig(_ context.Context, dir string, pw []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dirs = append(f.dirs, dir)
+	f.seen = append(f.seen, pw)
+	if string(pw) != f.password {
+		return fmt.Errorf("restic cat failed: %w", restic.ErrWrongPassword)
+	}
+	return nil
+}
+
 func (v *fakeVault) Has(name string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -117,7 +164,9 @@ type testEnv struct {
 	limiter  *auth.Limiter
 	store    *store.Store
 	scanner  *fakeScanner
+	restic   *fakeRestic
 	reposDir string
+	opts     Options
 }
 
 const testSetupCode = "ABCD-EFGH-JKMN-PQRS"
@@ -131,13 +180,13 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 	t.Cleanup(func() { _ = db.Close() })
 	e := &testEnv{
 		vault: &fakeVault{}, audit: &recorder{}, limiter: auth.NewLimiter(time.Now),
-		store: db, scanner: &fakeScanner{}, reposDir: t.TempDir(),
+		store: db, scanner: &fakeScanner{}, restic: &fakeRestic{password: "repo secret"}, reposDir: t.TempDir(),
 	}
 	code := testSetupCode
 	if initialized {
 		e.vault.password, e.vault.sealed, code = []byte("correct horse battery"), true, ""
 	}
-	e.h = New(Options{
+	e.opts = Options{
 		Version:       "test",
 		CAPEM:         caPEM,
 		CAFingerprint: "AB:CD",
@@ -150,10 +199,12 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 		Repos:         db,
 		Users:         &htpasswd.File{Path: filepath.Join(e.reposDir, ".htpasswd")},
 		Scanner:       e.scanner,
+		Restic:        e.restic,
 		ReposDir:      e.reposDir,
 		Location:      time.UTC,
 		SetupCode:     code,
-	})
+	}
+	e.h = New(e.opts)
 	return e
 }
 

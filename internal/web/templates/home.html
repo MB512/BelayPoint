@@ -16,7 +16,7 @@ at start and on rescan; lock files are read live.</p>
 <td class="bar">{{if .Share}}<meter min="0" max="{{$.Total.MaxBytes}}" value="{{.Bytes}}" title="{{.Share}} of the total"></meter> <span class="muted">{{.Share}}</span>{{end}}</td>
 <td class="num">{{if .Size}}{{.Files}}{{end}}</td>
 <td>{{if .LockError}}<span class="badge bad">unreadable</span>{{else if .Locks}}<span class="badge{{if .StaleLock}} bad{{end}}" title="{{if .StaleLock}}older than 24 h: probably stale{{end}}">{{.Locks}}, oldest {{.OldestLock}}</span>{{else if not .Missing}}none{{end}}</td>
-<td>{{if .Password}}stored{{else}}<span class="muted">not set</span>{{end}}</td>
+<td class="nowrap">{{if .Missing}}{{if .Password}}stored{{end}}{{else}}<a href="/repos/password?repo={{.Path}}">{{if .Password}}stored{{else}}set…{{end}}</a>{{end}}</td>
 </tr>
 {{end}}
 </tbody>

@@ -45,6 +45,8 @@ type Vault interface {
 	Unseal(password []byte) error
 	Seal()
 	Has(name string) bool
+	SetSecret(name string, value []byte) error
+	DeleteSecret(name string) error
 }
 
 // Auditor records security-relevant events (docs/security.md, rule 12).
@@ -88,6 +90,8 @@ type Options struct {
 	Repos    RepoList
 	Users    Users
 	Scanner  Scanner
+	// Restic checks repository passwords; nil when restic is missing.
+	Restic Restic
 	// ReposDir is the repository root (BELAYPOINT_REPOS_DIR).
 	ReposDir string
 	// Location is the time zone for times shown in the UI (TZ).
@@ -131,6 +135,9 @@ func New(opts Options) http.Handler {
 		r.Use(s.requireSession)
 		r.Get("/", s.home)
 		r.Post("/repos/rescan", s.rescan)
+		r.Get("/repos/password", s.repoPasswordPage)
+		r.Post("/repos/password", s.setRepoPassword)
+		r.Post("/repos/password/remove", s.forgetRepoPassword)
 		r.Get("/users", s.usersPage)
 		r.Post("/users/add", s.addUser)
 		r.Get("/users/reset", s.confirmUser("reset"))
@@ -183,6 +190,8 @@ type page struct {
 	Scanning bool
 	// users pages
 	Users *usersData
+	// repository password page
+	RepoPassword *repoPasswordData
 }
 
 func (s *server) render(w http.ResponseWriter, status int, name string, p page) {

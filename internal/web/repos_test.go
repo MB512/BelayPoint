@@ -62,7 +62,7 @@ func TestOverview(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("overview: %d", w.Code)
 	}
-	for _, want := range []string{"alice/main", "3.0 GiB", "42", "100 %", "Per user", "<meter", "bob/main", "1, oldest 30 h", "badge bad", "gone/repo", "missing", "stored", "not set"} {
+	for _, want := range []string{"alice/main", "3.0 GiB", "42", "100 %", "Per user", "<meter", "bob/main", "1, oldest 30 h", "badge bad", "gone/repo", "missing", "stored", "set…", "/repos/password?repo=bob%2fmain"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("overview lacks %q", want)
 		}

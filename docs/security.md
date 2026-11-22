@@ -93,7 +93,8 @@ therefore the unsealed secrets; nothing in a container prevents that.
     mode 0640 or stricter. The file is re-read and validated before each
     change; a file that cannot be parsed is never overwritten.
 12. **Audit log.** Login, failed login, unseal/seal, password change, user
-    changes in `.htpasswd`, repository password changes, job starts (manual
+    changes in `.htpasswd`, repository passwords stored, rejected by restic
+    or removed, job starts (manual
     and scheduled), settings changes. No secrets in entries.
 
 ## Reporting vulnerabilities

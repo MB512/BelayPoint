@@ -33,6 +33,7 @@ import (
 	"github.com/MB512/belaypoint/internal/htpasswd"
 	"github.com/MB512/belaypoint/internal/netguard"
 	"github.com/MB512/belaypoint/internal/repos"
+	"github.com/MB512/belaypoint/internal/restic"
 	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/tlscert"
 	"github.com/MB512/belaypoint/internal/vault"
@@ -102,6 +103,8 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 	scanner := &repos.Scanner{Root: cfg.ReposDir, Store: db, Logger: logger, Now: time.Now}
 	scanner.Start(ctx)
 
+	resticCLI := openRestic(ctx, logger, cfg)
+
 	// The vault is opened (not unsealed) at startup, so a damaged file
 	// stops the start instead of being replaced by a new, empty vault.
 	vlt, err := vault.Open(filepath.Join(cfg.ConfigDir, "vault.json"))
@@ -163,6 +166,7 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			Repos:         db,
 			Users:         users,
 			Scanner:       rescanner{ctx, scanner},
+			Restic:        resticCLI,
 			ReposDir:      cfg.ReposDir,
 			Location:      cfg.Location,
 			SetupCode:     setupCode,
@@ -230,6 +234,31 @@ func tlsConfig(cert tlscert.Result) *tls.Config {
 		Certificates: []tls.Certificate{cert.Certificate},
 		MinVersion:   tls.VersionTLS12,
 	}
+}
+
+// openRestic prepares the restic runner with its cache in the config
+// directory. Without restic BelayPoint still starts (overview, users), so
+// the result is nil then. It returns the interface type on purpose: a nil
+// *restic.CLI stored in an interface would not compare equal to nil (a
+// classic Go pitfall without a C# counterpart).
+func openRestic(ctx context.Context, logger *slog.Logger, cfg config.Config) web.Restic {
+	cacheDir := filepath.Join(cfg.ConfigDir, "cache")
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		logger.Error("restic cache directory", "err", err)
+		return nil
+	}
+	cli, err := restic.New(cacheDir, cfg.LockWait)
+	if err != nil {
+		logger.Error("restic not available: repository passwords cannot be checked", "err", err)
+		return nil
+	}
+	v, err := cli.Version(ctx)
+	if err != nil {
+		logger.Error("restic not usable", "err", err)
+		return nil
+	}
+	logger.Info("restic", "version", v)
+	return cli
 }
 
 // checkOwner warns if the process does not run as the owner of the

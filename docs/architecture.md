@@ -219,9 +219,12 @@ key check. Consequences:
 
 Sessions are kept in memory only; a restart logs everybody out.
 
-A repository password is entered once per repository in the UI and checked
-with `restic cat config` before it is stored. Leading and trailing whitespace
-is removed, as restic does for `--password-file` (issue #3). Optionally BelayPoint can add a
+A repository password is entered once per repository in the UI (overview,
+"Password" column) and checked with `restic cat config` before it is stored.
+Leading and trailing whitespace is removed, as restic does for
+`--password-file` (issue #3). A stored password can be removed again; only
+BelayPoint loses access. Without a restic binary BelayPoint still starts;
+passwords then cannot be checked or stored. Optionally BelayPoint can add a
 dedicated key with `restic key add`, so the client's password is not needed
 after that and BelayPoint's access can be revoked separately.
 
