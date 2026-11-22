@@ -18,6 +18,15 @@ type Repo struct {
 	// Usage is nil until the first disk usage walk finished.
 	Usage     *repos.Usage
 	UsageTime time.Time
+	// Snapshots is nil until the first snapshots job succeeded.
+	Snapshots *SnapshotSummary
+}
+
+// SnapshotSummary is the cached result of the last snapshot listing.
+type SnapshotSummary struct {
+	Count  int
+	Newest time.Time // zero if there are none
+	Time   time.Time // when they were listed
 }
 
 // SyncRepos records the result of a discovery: paths are present (added
@@ -59,7 +68,9 @@ func (s *Store) SetRepoUsage(ctx context.Context, path string, u repos.Usage, at
 // ListRepos returns all known repositories, sorted by path.
 func (s *Store) ListRepos(ctx context.Context) ([]Repo, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT path, missing, first_seen, last_seen, usage_bytes, usage_files, usage_time FROM repos ORDER BY path`)
+		`SELECT path, missing, first_seen, last_seen, usage_bytes, usage_files, usage_time,
+		        snapshot_count, snapshot_newest, snapshots_time
+		 FROM repos ORDER BY path`)
 	if err != nil {
 		return nil, fmt.Errorf("listing repositories: %w", err)
 	}
@@ -70,14 +81,20 @@ func (s *Store) ListRepos(ctx context.Context) ([]Repo, error) {
 		var first, last int64
 		// sql.Null* are like Nullable<T> in C#: Valid says whether the
 		// column was NULL.
-		var bytes, files, at sql.NullInt64
-		if err := rows.Scan(&r.Path, &r.Missing, &first, &last, &bytes, &files, &at); err != nil {
+		var bytes, files, at, count, newest, listed sql.NullInt64
+		if err := rows.Scan(&r.Path, &r.Missing, &first, &last, &bytes, &files, &at, &count, &newest, &listed); err != nil {
 			return nil, fmt.Errorf("listing repositories: %w", err)
 		}
 		r.FirstSeen, r.LastSeen = time.UnixMilli(first), time.UnixMilli(last)
 		if bytes.Valid {
 			r.Usage = &repos.Usage{Bytes: bytes.Int64, Files: files.Int64}
 			r.UsageTime = time.UnixMilli(at.Int64)
+		}
+		if count.Valid {
+			r.Snapshots = &SnapshotSummary{Count: int(count.Int64), Time: time.UnixMilli(listed.Int64)}
+			if newest.Valid {
+				r.Snapshots.Newest = time.UnixMilli(newest.Int64)
+			}
 		}
 		out = append(out, r)
 	}
