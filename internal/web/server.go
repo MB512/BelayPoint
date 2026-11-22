@@ -150,6 +150,8 @@ func New(opts Options) http.Handler {
 		r.Get("/repos/view", s.repoPage)
 		r.Post("/repos/policy", s.setPolicy)
 		r.Post("/repos/forget-preview", s.previewForget)
+		r.Get("/repos/maintenance", s.maintenancePage)
+		r.Post("/repos/maintenance", s.startMaintenance)
 		r.Post("/repos/unlock", s.unlock)
 		r.Get("/repos/unlock-all", s.unlockAllPage)
 		r.Post("/repos/unlock-all", s.unlockAll)
@@ -217,7 +219,8 @@ type page struct {
 	JobsAvailable bool
 	Log           *logData
 	// repository page
-	Repo *repoData
+	Repo        *repoData
+	Maintenance *maintenanceData
 }
 
 func (s *server) render(w http.ResponseWriter, status int, name string, p page) {

@@ -3,6 +3,20 @@
 <p>User {{.Owner}}. Password: {{if .Password}}stored{{else}}<strong>not set</strong>{{end}}
 (<a href="/repos/password?repo={{.Path}}">{{if .Password}}change{{else}}set{{end}}</a>).</p>
 
+{{if and $.JobsAvailable .Password}}
+<h2>Maintenance</h2>
+<p class="muted">Jobs wait in the queue and run one at a time per repository. forget, prune and check take an exclusive
+lock: a client backup that starts meanwhile waits for it (or fails without <code>--retry-lock</code>).
+Results are on the <a href="/jobs">Jobs</a> page.</p>
+<div class="buttons">
+<a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=forget">Forget…</a>
+<a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=prune">Prune…</a>
+<form method="post" action="/repos/maintenance"><input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="repo" value="{{.Path}}"><input type="hidden" name="job" value="check">
+<button type="submit" title="restic check: verifies the repository structure (reads no pack data)">Check</button></form>
+</div>
+{{end}}
+
 <h2>Retention policy</h2>
 <p class="muted">{{if .Custom}}This repository has its own policy.{{else}}The default policy applies.{{end}}
 Snapshots are grouped by host and paths: every client and every backup set keeps its own history.

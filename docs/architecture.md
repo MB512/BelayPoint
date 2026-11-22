@@ -327,6 +327,17 @@ without saving them, and lists per group which snapshots would be kept and
 removed. It runs right away, outside the job queue: it is read-only and takes
 no lock, so it cannot conflict with jobs or client backups.
 
+### Running maintenance by hand
+
+The repository page offers "Forget…", "Prune…" and "Check". forget and
+prune open a confirmation page (forget shows the saved policy) and need a
+ticked checkbox; check runs directly. forget uses the saved policy (or the
+default), logs every removed snapshot and updates the cached snapshot summary
+from restic's result. prune uses `--max-unused 5%`. A check started by hand
+verifies the structure only (no `--read-data-subset`). All three wait up to
+`BELAYPOINT_LOCK_WAIT` for other locks (`--retry-lock`) and then fail with a
+lock error.
+
 ### Maintenance plan
 
 Per repository one plan, run as **one job** in a maintenance window (cron

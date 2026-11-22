@@ -86,3 +86,6 @@ a.small { font-size: .85em; }
 .policy .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: .75rem; }
 h3 { font-size: 1rem; margin: 1.5rem 0 .25rem; }
 details summary { cursor: pointer; }
+a.button { display: inline-block; padding: .5rem 1rem; border-radius: 6px; color: #fff; background: var(--accent); text-decoration: none; }
+a.button.danger { background: var(--danger); }
+label.check { display: flex; align-items: center; gap: .5rem; font-weight: 400; }

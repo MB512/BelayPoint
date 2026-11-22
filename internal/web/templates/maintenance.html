@@ -1,0 +1,25 @@
+{{template "top" .}}
+{{with .Maintenance}}
+{{if eq .Job "forget"}}
+<p class="warn"><strong>forget removes the snapshots of <code>{{.Path}}</code> that the
+{{if .Custom}}repository's{{else}}default{{end}} retention policy does not keep.</strong>
+They cannot be restored afterwards. The backup clients write append-only, so BelayPoint is the only place where this happens.</p>
+<p>Policy: <code>{{.Policy}}</code>, grouped by host and paths.
+Use "Preview" on the <a href="/repos/view?repo={{.Path}}">repository page</a> first to see which snapshots go.</p>
+<p class="muted">The disk space is freed only by a later prune.</p>
+{{else}}
+<p class="warn"><strong>prune deletes the data in <code>{{.Path}}</code> that no snapshot references any more</strong>
+(after forget). Up to 5 % unused data may stay, so fewer files have to be rewritten.</p>
+<p class="muted">prune can take long on a large repository and needs some free space for the rewritten files.
+Client backups wait for it (or fail) while it runs.</p>
+{{end}}
+<form method="post" action="/repos/maintenance" class="stack">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="repo" value="{{.Path}}">
+<input type="hidden" name="job" value="{{.Job}}">
+<label class="check"><input type="checkbox" name="confirm" value="yes" required> I want to run {{.Job}} on {{.Path}}</label>
+<button type="submit" class="danger">Run {{.Job}}</button>
+</form>
+<p><a href="/repos/view?repo={{.Path}}">Cancel</a></p>
+{{end}}
+{{template "bottom" .}}

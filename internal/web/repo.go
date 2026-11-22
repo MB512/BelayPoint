@@ -198,3 +198,56 @@ func (s *server) preview(groups []restic.ForgetGroup) *previewData {
 	}
 	return d
 }
+
+// maintenanceJobs are the jobs started from the repository page; the
+// destructive ones need a confirmation page (CLAUDE.md, hard rules).
+var maintenanceJobs = map[jobs.Type]bool{jobs.Forget: true, jobs.Prune: true, jobs.Check: false}
+
+// maintenanceData is the data of the confirmation page.
+type maintenanceData struct {
+	Path   string
+	Job    string
+	Policy string // forget: the saved policy as restic arguments
+	Custom bool
+}
+
+func (s *server) maintenancePage(w http.ResponseWriter, r *http.Request) {
+	path, typ := r.URL.Query().Get("repo"), jobs.Type(r.URL.Query().Get("job"))
+	if _, ok := s.knownRepo(r.Context(), path); !ok || !maintenanceJobs[typ] {
+		http.NotFound(w, r)
+		return
+	}
+	d := &maintenanceData{Path: path, Job: string(typ)}
+	if typ == jobs.Forget {
+		p, custom, err := s.Policies.RepoPolicy(r.Context(), path)
+		if err != nil {
+			s.Logger.Error("reading policy", "repo", path, "err", err)
+			http.Error(w, "reading the policy failed; see the container log", http.StatusInternalServerError)
+			return
+		}
+		d.Policy, d.Custom = strings.Join(p.Args()[2:], " "), custom
+	}
+	s.render(w, http.StatusOK, "maintenance.html", page{
+		Title: string(typ) + " " + path, CSRF: sessionFrom(r.Context()).CSRF, Maintenance: d,
+	})
+}
+
+// startMaintenance queues forget, prune (both confirmed) or check.
+func (s *server) startMaintenance(w http.ResponseWriter, r *http.Request) {
+	f, ok := s.postForm(w, r)
+	if !ok {
+		return
+	}
+	defer f.wipe()
+	typ := jobs.Type(f.get("job"))
+	destructive, known := maintenanceJobs[typ]
+	if !known {
+		http.NotFound(w, r)
+		return
+	}
+	if destructive && f.get("confirm") != "yes" {
+		http.Error(w, "not confirmed", http.StatusBadRequest)
+		return
+	}
+	s.submitJob(w, r, f.get("repo"), typ)
+}

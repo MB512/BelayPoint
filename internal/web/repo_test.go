@@ -93,3 +93,44 @@ func TestForgetPreview(t *testing.T) {
 		t.Errorf("without password: %d", w.Code)
 	}
 }
+
+func TestMaintenance(t *testing.T) {
+	e := newEnv(t, nil, true)
+	ctx := context.Background()
+	makeRepo(t, e.reposDir, "alice/main")
+	_ = e.store.SyncRepos(ctx, []string{"alice/main"})
+	cookie := login(t, e)
+	csrf := csrfFromPage(t, e.h, cookie)
+
+	w := getWithCookie(e.h, "/repos/maintenance?repo=alice/main&job=forget", cookie)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "--keep-daily 7") {
+		t.Errorf("forget confirm page: %d", w.Code)
+	}
+	for _, bad := range []string{"job=check", "job=unlock-all", "job=x", "job=forget&repo=../x"} {
+		if w := getWithCookie(e.h, "/repos/maintenance?repo=alice/main&"+bad, cookie); w.Code != http.StatusNotFound && !strings.Contains(bad, "repo=") {
+			t.Errorf("%s: %d", bad, w.Code)
+		}
+	}
+	v := func(job, confirm string) url.Values {
+		x := url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "job": {job}}
+		if confirm != "" {
+			x.Set("confirm", confirm)
+		}
+		return x
+	}
+	for _, job := range []string{"forget", "prune"} {
+		if w := post(e.h, "/repos/maintenance", cookie, v(job, ""), nil); w.Code != http.StatusBadRequest {
+			t.Errorf("%s without confirmation: %d", job, w.Code)
+		}
+	}
+	if w := post(e.h, "/repos/maintenance", cookie, v("unlock-all", "yes"), nil); w.Code != http.StatusNotFound {
+		t.Errorf("unlock-all through maintenance: %d", w.Code)
+	}
+	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, v("forget", "yes"), nil), "/")
+	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, v("prune", "yes"), nil), "/")
+	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, v("check", ""), nil), "/")
+	want := []string{"forget alice/main", "prune alice/main", "check alice/main"}
+	if strings.Join(e.jobs.submitted, ",") != strings.Join(want, ",") {
+		t.Errorf("submitted %v", e.jobs.submitted)
+	}
+}
