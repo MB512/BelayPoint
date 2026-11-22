@@ -45,8 +45,8 @@ func TestRepoPassword(t *testing.T) {
 
 	// Wrong password: rejected, audited, not stored.
 	w := post(e.h, "/repos/password", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "password": {"guess"}}, nil)
-	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "does not accept") {
-		t.Errorf("wrong password: %d", w.Code)
+	if w.Code != http.StatusBadRequest || strings.Count(w.Body.String(), "does not accept") != 1 {
+		t.Errorf("wrong password: %d, message must appear once", w.Code)
 	}
 	if e.vault.Has(name) || !e.audit.has("repository password rejected") {
 		t.Error("wrong password stored or not audited")

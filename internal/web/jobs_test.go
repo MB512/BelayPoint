@@ -47,7 +47,7 @@ func TestRefreshSnapshots(t *testing.T) {
 	// Errors are shown on the overview.
 	e.jobs.err = jobs.ErrSealed
 	w := post(e.h, "/repos/snapshots", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}}, nil)
-	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "sealed") {
+	if w.Code != http.StatusServiceUnavailable || strings.Count(w.Body.String(), "the vault is sealed") != 1 {
 		t.Errorf("error: %d", w.Code)
 	}
 

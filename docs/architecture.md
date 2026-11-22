@@ -252,7 +252,12 @@ Per repository the UI shows:
 - lock details (needs the password: lock files are encrypted),
 - maintenance plan, last runs and their results.
 
-Below that, a per-user summary (the user is the first path component, as with
+Every page behind the login shows a bar with the used and free space of the
+volume holding `/repos` (statfs), with the backups' total on the overview. It
+turns yellow at 80 % and red with a warning at 90 %: `prune` needs free space
+to rewrite packs.
+
+Below the repository table, a per-user summary (the user is the first path component, as with
 `--private-repos`) sums repositories, size and files, largest first, with a
 total. Missing repositories are not counted; repositories not measured yet
 are counted but marked, since their size is not in the sum.

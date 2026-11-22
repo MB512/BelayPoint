@@ -197,6 +197,9 @@ type page struct {
 	Users *usersData
 	// repository password page
 	RepoPassword *repoPasswordData
+	// Disk is the volume of the repository root, shown on every page
+	// behind the login.
+	Disk *diskData
 	// jobs page; JobsAvailable is false without restic
 	Jobs          []jobRow
 	JobsAvailable bool
@@ -206,6 +209,9 @@ func (s *server) render(w http.ResponseWriter, status int, name string, p page) 
 	p.Version = s.Version
 	p.HasCA = s.CAPEM != nil
 	p.CAFingerprint = s.CAFingerprint
+	if p.CSRF != "" && p.Disk == nil {
+		p.Disk = s.disk()
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	if err := templates.ExecuteTemplate(w, name, p); err != nil {

@@ -22,6 +22,11 @@
 </nav>
 {{end}}
 </header>
+{{with .Disk}}<div class="disk{{if .Full}} full{{end}}">
+<span>Volume</span>
+<meter min="0" max="{{.TotalBytes}}" low="{{.LowBytes}}" high="{{.HighBytes}}" optimum="0" value="{{.UsedBytes}}"></meter>
+<span>{{.Used}} of {{.Total}} used ({{.Percent}}){{if $.Total.Bytes}}, backups {{$.Total.Size}}{{end}}, <strong>{{.Free}} free</strong>{{if .Full}}: running out of space; prune needs some room to work{{end}}</span>
+</div>{{end}}
 <main>
 <h1>{{.Title}}</h1>
 {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}

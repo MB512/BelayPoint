@@ -191,3 +191,13 @@ func Locks(dir string) ([]LockFile, error) {
 	slices.SortFunc(out, func(a, b LockFile) int { return a.ModTime.Compare(b.ModTime) })
 	return out, nil
 }
+
+// FSUsage describes the file system holding the repositories, in bytes.
+type FSUsage struct {
+	Total int64
+	Free  int64 // free blocks, including those reserved for root
+	Avail int64 // free blocks available to unprivileged users
+}
+
+// Used is Total minus Free, as df shows it.
+func (u FSUsage) Used() int64 { return u.Total - u.Free }

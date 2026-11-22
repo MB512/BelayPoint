@@ -147,3 +147,17 @@ func TestPercent(t *testing.T) {
 		}
 	}
 }
+
+func TestDiskBar(t *testing.T) {
+	e := newEnv(t, nil, true)
+	cookie := login(t, e)
+	for _, path := range []string{"/", "/users", "/jobs"} {
+		body := getWithCookie(e.h, path, cookie).Body.String()
+		if !strings.Contains(body, `class="disk`) || !strings.Contains(body, " free") {
+			t.Errorf("%s lacks the disk bar", path)
+		}
+	}
+	if body := get(e.h, "/login", nil).Body.String(); strings.Contains(body, `class="disk`) {
+		t.Error("disk bar shown before login")
+	}
+}

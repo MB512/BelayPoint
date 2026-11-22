@@ -9,7 +9,6 @@ at start and on rescan; lock files are read live.</p>
 <button type="submit" {{if .Scanning}}disabled{{end}}>{{if .Scanning}}Scanning…{{else}}Rescan{{end}}</button></form>
 </div>
 </div>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 {{if .Repos}}
 <table>
 <thead><tr><th>Repository</th><th>User</th><th class="num">Size</th><th class="bar">Share</th><th class="num">Files</th><th>Snapshots</th><th>Locks</th><th>Password</th></tr></thead>

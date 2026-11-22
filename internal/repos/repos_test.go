@@ -210,3 +210,13 @@ func TestScanner(t *testing.T) {
 		t.Errorf("usage %v", st.usage)
 	}
 }
+
+func TestFSStat(t *testing.T) {
+	u, err := FSStat(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Total <= 0 || u.Free < 0 || u.Free > u.Total || u.Avail > u.Free || u.Used() != u.Total-u.Free {
+		t.Errorf("usage = %+v", u)
+	}
+}
