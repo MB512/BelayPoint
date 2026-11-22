@@ -138,10 +138,16 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 		jobRunner web.Jobs
 		manager   *jobs.Manager
 	)
+	logDir := filepath.Join(cfg.ConfigDir, "jobs")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		logger.Error("job log directory", "err", err)
+		return 1
+	}
+	go cleanJobLogs(ctx, logger, logDir, cfg.JobLogRetention)
 	if cli := openRestic(ctx, logger, cfg); cli != nil {
 		manager = jobs.New(jobs.Options{
 			Root: cfg.ReposDir, Runner: cli, Secrets: vlt, Store: db,
-			Logger: logger, Now: time.Now, MaxJobs: cfg.MaxJobs,
+			Logger: logger, Now: time.Now, MaxJobs: cfg.MaxJobs, LogDir: logDir,
 		})
 		manager.Run(ctx)
 		checker, jobRunner = cli, manager
@@ -193,6 +199,7 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			Restic:        checker,
 			Jobs:          jobRunner,
 			JobList:       db,
+			JobLogDir:     logDir,
 			ReposDir:      cfg.ReposDir,
 			Location:      cfg.Location,
 			SetupCode:     setupCode,
@@ -264,6 +271,26 @@ func tlsConfig(cert tlscert.Result) *tls.Config {
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert.Certificate},
 		MinVersion:   tls.VersionTLS12,
+	}
+}
+
+// cleanJobLogs removes job logs older than the retention at startup and
+// then daily, until ctx is cancelled. A time.Ticker is like a
+// System.Threading.Timer whose ticks arrive on a channel.
+func cleanJobLogs(ctx context.Context, logger *slog.Logger, dir string, retention time.Duration) {
+	tick := time.NewTicker(24 * time.Hour)
+	defer tick.Stop()
+	for {
+		if n, err := jobs.CleanLogs(dir, retention, time.Now()); err != nil {
+			logger.Warn("cleaning job logs", "err", err)
+		} else if n > 0 {
+			logger.Info("old job logs removed", "files", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
 	}
 }
 

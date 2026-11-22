@@ -4,7 +4,7 @@
 <thead><tr><th>#</th><th>Queued</th><th>Repository</th><th>Job</th><th>State</th><th class="num">Duration</th><th>Result</th></tr></thead>
 <tbody>
 {{range .Jobs}}<tr>
-<td class="num">{{.ID}}</td>
+<td class="num"><a href="/jobs/{{.ID}}/log" title="Show the log">{{.ID}}</a></td>
 <td class="nowrap">{{.Queued}}</td>
 <td><code>{{.Repo}}</code></td>
 <td class="nowrap">{{.Type}}{{if eq .Trigger "schedule"}} <span class="badge">scheduled</span>{{end}}</td>

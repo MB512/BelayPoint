@@ -341,7 +341,14 @@ not run. Every step can also be started by hand.
   the skipped runs.
 - Sealing during a running job: the job finishes (restic already has the
   password), the secrets are not available for the next job.
-- Output is streamed to `/config/jobs/<id>.log` and to the UI (live log).
+- restic's output goes to `/config/jobs/<id>.log` (mode 0600), with the
+  repository password replaced by `[redacted]` should restic ever print it.
+  The "Jobs" page links each job to its log. Logs older than
+  `BELAYPOINT_JOB_LOG_RETENTION` are removed at startup and daily.
+- Locks: the overview offers "Remove stale" (`unlock`: restic removes locks
+  whose process is gone on the same host, or that were not refreshed for 30
+  minutes) and "all…" (`unlock --remove-all` on a page that warns and needs
+  the repository name typed).
 - States: `queued`, `running`, `succeeded`, `failed`, `refused`,
   `interrupted`. The "Jobs" page lists them, newest first.
 - After a restart, jobs still marked as queued or running are set to

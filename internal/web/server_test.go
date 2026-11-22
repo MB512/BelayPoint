@@ -188,6 +188,7 @@ type testEnv struct {
 	restic   *fakeRestic
 	jobs     *fakeJobs
 	reposDir string
+	logDir   string
 	opts     Options
 }
 
@@ -202,7 +203,7 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 	t.Cleanup(func() { _ = db.Close() })
 	e := &testEnv{
 		vault: &fakeVault{}, audit: &recorder{}, limiter: auth.NewLimiter(time.Now),
-		store: db, scanner: &fakeScanner{}, restic: &fakeRestic{password: "repo secret"}, jobs: &fakeJobs{busy: map[string]bool{}}, reposDir: t.TempDir(),
+		store: db, scanner: &fakeScanner{}, restic: &fakeRestic{password: "repo secret"}, jobs: &fakeJobs{busy: map[string]bool{}}, logDir: t.TempDir(), reposDir: t.TempDir(),
 	}
 	code := testSetupCode
 	if initialized {
@@ -224,6 +225,7 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 		Restic:        e.restic,
 		Jobs:          e.jobs,
 		JobList:       db,
+		JobLogDir:     e.logDir,
 		ReposDir:      e.reposDir,
 		Location:      time.UTC,
 		SetupCode:     code,

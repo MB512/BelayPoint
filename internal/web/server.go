@@ -95,6 +95,8 @@ type Options struct {
 	Restic  Restic
 	Jobs    Jobs
 	JobList JobList
+	// JobLogDir holds the job logs (<id>.log).
+	JobLogDir string
 	// ReposDir is the repository root (BELAYPOINT_REPOS_DIR).
 	ReposDir string
 	// Location is the time zone for times shown in the UI (TZ).
@@ -142,7 +144,11 @@ func New(opts Options) http.Handler {
 		r.Post("/repos/password", s.setRepoPassword)
 		r.Post("/repos/password/remove", s.forgetRepoPassword)
 		r.Post("/repos/snapshots", s.refreshSnapshots)
+		r.Post("/repos/unlock", s.unlock)
+		r.Get("/repos/unlock-all", s.unlockAllPage)
+		r.Post("/repos/unlock-all", s.unlockAll)
 		r.Get("/jobs", s.jobsPage)
+		r.Get("/jobs/{id}/log", s.jobLog)
 		r.Get("/users", s.usersPage)
 		r.Post("/users/add", s.addUser)
 		r.Get("/users/reset", s.confirmUser("reset"))
@@ -203,6 +209,7 @@ type page struct {
 	// jobs page; JobsAvailable is false without restic
 	Jobs          []jobRow
 	JobsAvailable bool
+	Log           *logData
 }
 
 func (s *server) render(w http.ResponseWriter, status int, name string, p page) {

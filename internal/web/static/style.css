@@ -81,3 +81,5 @@ button.small { padding: 0 .4rem; font-size: .85em; }
 .disk span:first-child { font-weight: 600; color: var(--muted); }
 .disk meter { width: min(24rem, 100%); height: 1rem; }
 .disk.full { background: var(--error-bg); }
+pre.log { padding: .75rem 1rem; background: var(--card); border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
+a.small { font-size: .85em; }

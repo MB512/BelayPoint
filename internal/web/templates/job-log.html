@@ -1,0 +1,7 @@
+{{template "top" .}}
+{{with .Log}}
+{{if .Truncated}}<p class="muted">Only the end of the log is shown.</p>{{end}}
+<pre class="log">{{.Text}}</pre>
+{{end}}
+<p><a href="/jobs">Back to the jobs</a></p>
+{{template "bottom" .}}
