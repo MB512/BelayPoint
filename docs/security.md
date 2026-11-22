@@ -45,7 +45,9 @@ therefore the unsealed secrets; nothing in a container prevents that.
    only through `--password-file /dev/fd/3` (pipe), never through arguments
    (visible in `ps`) or the environment (visible in `/proc/<pid>/environ`).
    restic gets an allow-listed environment. Job logs and UI output are
-   filtered for the secret values.
+   filtered for the secret values. Limit: Go's AES implementation keeps its
+   own expanded copy of the key, which cannot be zeroed; BelayPoint creates
+   the cipher per operation, so that copy is short-lived garbage.
 5. **Sealed by default.** After every start nothing runs until the admin logs
    in. "Seal now" wipes the secrets immediately. Sessions live in memory only.
 6. **Authentication.** One admin. Login = deriving the vault key and opening

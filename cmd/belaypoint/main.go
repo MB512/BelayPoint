@@ -31,6 +31,7 @@ import (
 	"github.com/MB512/belaypoint/internal/config"
 	"github.com/MB512/belaypoint/internal/netguard"
 	"github.com/MB512/belaypoint/internal/tlscert"
+	"github.com/MB512/belaypoint/internal/vault"
 	"github.com/MB512/belaypoint/internal/web"
 )
 
@@ -75,6 +76,19 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	logger.Info("starting BelayPoint", "version", buildinfo.Version)
 	checkOwner(logger, cfg.ReposDir)
+
+	// The vault is opened (not unsealed) at startup, so a damaged file
+	// stops the start instead of being replaced by a new, empty vault.
+	vlt, err := vault.Open(filepath.Join(cfg.ConfigDir, "vault.json"))
+	if err != nil {
+		logger.Error("vault", "err", err)
+		return 1
+	}
+	if vlt.Initialized() {
+		logger.Info("vault: sealed, log in to unseal", "secrets", len(vlt.Names()))
+	} else {
+		logger.Info("vault: not initialized, set the admin password in the web UI")
+	}
 
 	var ips []netip.Addr
 	if cfg.HasLANAddress() {

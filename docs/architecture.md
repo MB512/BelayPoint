@@ -180,8 +180,13 @@ replaces the CA.
 
 - argon2id parameters and salt,
 - a key check (a fixed text sealed with AES-256-GCM),
-- the sealed secrets: per repository path the repository password, and the
-  optional TOTP secret.
+- the sealed secrets by name: `repo:<path>` per repository (the repository
+  password), and `totp` (the optional TOTP secret). Each is sealed with the
+  vault key, a random nonce and its name as associated data.
+
+The file is written atomically with mode 0600. A file that cannot be parsed,
+or whose argon2id parameters are out of bounds, stops the start; it is never
+replaced by a new vault.
 
 The vault key is derived from the **admin password** with argon2id. There is
 no separate password hash: logging in means deriving the key and opening the
@@ -189,9 +194,11 @@ key check. Consequences:
 
 - After a start BelayPoint is **sealed**: no jobs run, the UI shows only the
   login page.
-- Logging in unseals: the derived key and the decrypted secrets are kept in
-  memory as `[]byte`.
-- "Seal now" in the UI or a restart wipes them from memory (zeroed).
+- Logging in unseals: the derived key is kept in memory as `[]byte`. Secrets
+  are decrypted when needed; the caller gets its own copy and zeroes it after
+  use.
+- "Seal now" in the UI or a restart zeroes the key. A job that already got
+  its password finishes; the next one is refused.
 - Changing the admin password re-encrypts the vault with a new salt.
 - On first start (no `vault.json`) the UI asks for the admin password once and
   creates the vault.

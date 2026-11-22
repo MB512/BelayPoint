@@ -77,6 +77,9 @@ func TestServeEndToEnd(t *testing.T) {
 	if !strings.Contains(logBuf.String(), "sha256=") {
 		t.Errorf("fingerprints not logged:\n%s", logBuf.String())
 	}
+	if !strings.Contains(logBuf.String(), "vault: not initialized") {
+		t.Errorf("vault state not logged:\n%s", logBuf.String())
+	}
 
 	cancel()
 	select {
@@ -86,6 +89,29 @@ func TestServeEndToEnd(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("server did not stop")
+	}
+}
+
+func TestServeDamagedVault(t *testing.T) {
+	cfgDir := t.TempDir()
+	vaultPath := filepath.Join(cfgDir, "vault.json")
+	if err := os.WriteFile(vaultPath, []byte("{damaged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	envs := map[string]string{
+		config.EnvListen:    "127.0.0.1:0",
+		config.EnvConfigDir: cfgDir,
+		config.EnvReposDir:  t.TempDir(),
+	}
+	var stderr syncBuffer
+	code := serve(context.Background(), func(k string) string { return envs[k] }, &stderr, func(string) {
+		t.Error("server started with a damaged vault")
+	})
+	if code != 1 || !strings.Contains(stderr.String(), "vault") {
+		t.Errorf("code %d, log:\n%s", code, stderr.String())
+	}
+	if data, _ := os.ReadFile(vaultPath); string(data) != "{damaged" {
+		t.Errorf("damaged vault was overwritten: %q", data)
 	}
 }
 
