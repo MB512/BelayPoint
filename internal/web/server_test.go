@@ -326,6 +326,24 @@ func TestStaticCSS(t *testing.T) {
 	}
 }
 
+func TestStaticIcons(t *testing.T) {
+	h := handler(t, nil)
+	for path, ctype := range map[string]string{
+		"/static/favicon.svg":          "image/svg+xml",
+		"/static/favicon.ico":          "image/",
+		"/static/apple-touch-icon.png": "image/png",
+	} {
+		w := get(h, path, nil)
+		if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), ctype) {
+			t.Errorf("%s: got %d %q", path, w.Code, w.Header().Get("Content-Type"))
+		}
+	}
+	// The login page uses the layout too: it must link the icons.
+	if body := get(handler(t, []byte("x")), "/login", nil).Body.String(); !strings.Contains(body, `href="/static/favicon.svg"`) {
+		t.Error("pages must link the favicon")
+	}
+}
+
 func TestSecurityHeaders(t *testing.T) {
 	w := get(handler(t, nil), "/login", nil)
 	for _, h := range []string{"Content-Security-Policy", "Cache-Control", "X-Content-Type-Options", "X-Frame-Options"} {
