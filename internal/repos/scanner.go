@@ -63,6 +63,9 @@ func (s *Scanner) Running() bool {
 func (s *Scanner) scan(ctx context.Context) {
 	start := s.Now()
 	found, skipped, err := Discover(ctx, s.Root)
+	if ctx.Err() != nil {
+		return // shutting down
+	}
 	if err != nil {
 		s.Logger.Error("repository scan", "err", err)
 		return
@@ -71,6 +74,9 @@ func (s *Scanner) scan(ctx context.Context) {
 		s.Logger.Warn("repository scan: skipped unreadable directory", "err", e)
 	}
 	if err := s.Store.SyncRepos(ctx, found); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		s.Logger.Error("repository scan", "err", err)
 		return
 	}
@@ -90,6 +96,9 @@ func (s *Scanner) scan(ctx context.Context) {
 			continue
 		}
 		if err := s.Store.SetRepoUsage(ctx, rel, u, s.Now()); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			s.Logger.Error("repository scan", "repo", rel, "err", err)
 		}
 	}
