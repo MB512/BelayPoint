@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/MB512/belaypoint/internal/restic"
+	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/vault"
 )
 
@@ -54,14 +55,16 @@ func (f *fakeSecrets) Secret(name string) ([]byte, error) {
 // fakeRunner lists snapshots; with block set it waits for release (or
 // ctx) first.
 type fakeRunner struct {
-	mu      sync.Mutex
-	block   bool
-	started chan string   // repo of each started call
-	release chan struct{} // closed to let blocked calls finish
-	err     error
-	active  int
-	peak    int
-	seenPW  []string
+	mu       sync.Mutex
+	block    bool
+	started  chan string   // repo of each started call
+	release  chan struct{} // closed to let blocked calls finish
+	err      error
+	active   int
+	peak     int
+	seenPW   []string
+	steps    []string
+	pruneErr error
 }
 
 func newRunner(block bool) *fakeRunner {
@@ -94,11 +97,20 @@ func (f *fakeRunner) Forget(_ context.Context, _ string, pw []byte, p restic.Pol
 
 func (f *fakeRunner) Prune(_ context.Context, _ string, _ []byte, maxUnused string, log io.Writer) error {
 	fmt.Fprintf(log, "prune --max-unused %s\n", maxUnused)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.steps = append(f.steps, "prune")
+	if f.pruneErr != nil {
+		return f.pruneErr
+	}
 	return f.err
 }
 
 func (f *fakeRunner) Check(_ context.Context, _ string, _ []byte, subset string, log io.Writer) error {
 	fmt.Fprintf(log, "check subset=%q\n", subset)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.steps = append(f.steps, "check "+subset)
 	return f.err
 }
 
@@ -144,6 +156,7 @@ type fakeStore struct {
 	next      int64
 	snapshots map[string]int
 	newest    map[string]time.Time
+	plans     map[string]store.Plan
 	done      chan int64
 }
 
@@ -152,7 +165,7 @@ type jobRow struct {
 }
 
 func newStore() *fakeStore {
-	return &fakeStore{jobs: map[int64]*jobRow{}, snapshots: map[string]int{}, newest: map[string]time.Time{}, done: make(chan int64, 16)}
+	return &fakeStore{jobs: map[int64]*jobRow{}, snapshots: map[string]int{}, newest: map[string]time.Time{}, plans: map[string]store.Plan{}, done: make(chan int64, 16)}
 }
 
 func (s *fakeStore) AddJob(_ context.Context, repo, typ, _ string, _ time.Time) (int64, error) {
@@ -191,6 +204,21 @@ func (s *fakeStore) RepoPolicy(_ context.Context, path string) (restic.Policy, b
 		return restic.Policy{KeepLast: 9}, true, nil
 	}
 	return restic.DefaultPolicy, false, nil
+}
+
+func (s *fakeStore) RepoPlan(_ context.Context, path string) (store.Plan, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.plans[path], nil
+}
+
+func (s *fakeStore) AdvanceCheckSubset(_ context.Context, path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.plans[path]
+	p.CheckSubsetN = p.CheckSubsetN%p.CheckSubsetT + 1
+	s.plans[path] = p
+	return nil
 }
 
 func (s *fakeStore) job(id int64) jobRow {
@@ -499,5 +527,48 @@ func TestForgetLockConflict(t *testing.T) {
 	e.waitDone(t)
 	if j := e.store.job(id); j.state != StateSucceeded {
 		t.Errorf("retry: %+v", j)
+	}
+}
+
+func TestMaintenancePlan(t *testing.T) {
+	e := newEnv(t, false, 1)
+	e.store.plans["alice/main"] = store.Plan{Unlock: true, Forget: true, Prune: true, Check: true, CheckSubsetT: 3, CheckSubsetN: 3}
+	id, err := e.m.Submit(context.Background(), "alice/main", Maintenance, Schedule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.waitDone(t)
+	waitIdle(t, e.m, "alice/main")
+	j := e.store.job(id)
+	want := "unlock: 2 locks removed; forget: 3 snapshots removed, 2 kept; prune: pruned; check: no errors found (data subset 3/3)"
+	if j.state != StateSucceeded || j.summary != want {
+		t.Errorf("job = %+v", j)
+	}
+	if n := e.store.plans["alice/main"].CheckSubsetN; n != 1 {
+		t.Errorf("subset after 3/3 = %d, want 1", n)
+	}
+
+	// A failed step stops the plan: no check, no advance.
+	e.runner.pruneErr = errors.New("disk full")
+	e.runner.steps = nil
+	id, _ = e.m.Submit(context.Background(), "alice/main", Maintenance, Schedule)
+	e.waitDone(t)
+	waitIdle(t, e.m, "alice/main")
+	j = e.store.job(id)
+	if j.state != StateFailed || !strings.Contains(j.err, "step prune: disk full") || !strings.Contains(j.err, "done before: unlock") {
+		t.Errorf("job = %+v", j)
+	}
+	if fmt.Sprint(e.runner.steps) != "[prune]" || e.store.plans["alice/main"].CheckSubsetN != 1 {
+		t.Errorf("steps %v, subset %d", e.runner.steps, e.store.plans["alice/main"].CheckSubsetN)
+	}
+
+	// Only check, without data subset.
+	e.runner.pruneErr = nil
+	e.runner.steps = nil
+	e.store.plans["alice/main"] = store.Plan{Check: true}
+	id, _ = e.m.Submit(context.Background(), "alice/main", Maintenance, Schedule)
+	e.waitDone(t)
+	if j := e.store.job(id); j.summary != "check: no errors found" || fmt.Sprint(e.runner.steps) != "[check ]" {
+		t.Errorf("job = %+v, steps %v", j, e.runner.steps)
 	}
 }

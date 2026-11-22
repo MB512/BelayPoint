@@ -14,6 +14,7 @@ import (
 
 	"github.com/MB512/belaypoint/internal/repos"
 	"github.com/MB512/belaypoint/internal/restic"
+	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/vault"
 )
 
@@ -28,12 +29,15 @@ const (
 	Forget    Type = "forget"     // remove snapshots per the repository's policy
 	Prune     Type = "prune"      // remove unreferenced data
 	Check     Type = "check"      // verify the repository structure
+	// Maintenance runs the steps of the repository's plan (unlock,
+	// forget, prune, check) as one job.
+	Maintenance Type = "maintenance"
 )
 
 // Valid reports whether t is a known job type.
 func (t Type) Valid() bool {
 	switch t {
-	case Snapshots, Unlock, UnlockAll, Forget, Prune, Check:
+	case Snapshots, Unlock, UnlockAll, Forget, Prune, Check, Maintenance:
 		return true
 	}
 	return false
@@ -86,6 +90,8 @@ type Store interface {
 	FinishJob(ctx context.Context, id int64, state, summary, errText string, at time.Time) error
 	SetRepoSnapshots(ctx context.Context, path string, count int, newest, at time.Time) error
 	RepoPolicy(ctx context.Context, path string) (restic.Policy, bool, error)
+	RepoPlan(ctx context.Context, path string) (store.Plan, error)
+	AdvanceCheckSubset(ctx context.Context, path string) error
 }
 
 // Manager queues and runs jobs. Create it with New, then call Run once.
@@ -327,43 +333,119 @@ func (m *Manager) execute(ctx, record context.Context, t task, dir string, pw []
 		}
 		return fmt.Sprintf("%d snapshots", len(list)), nil
 	case Unlock, UnlockAll:
-		n, err := m.runner.Unlock(ctx, dir, pw, t.typ == UnlockAll, jl)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%d locks removed", n), nil
+		return m.unlock(ctx, dir, pw, t.typ == UnlockAll, jl)
 	case Forget:
-		p, _, err := m.store.RepoPolicy(record, t.repo)
-		if err != nil {
-			return "", err
-		}
-		jl.Printf(m.now(), "policy: %s", strings.Join(p.Args(), " "))
-		groups, err := m.runner.Forget(ctx, dir, pw, p, jl)
-		if err != nil {
-			return "", err
-		}
-		// The kept snapshots are all that is left: update the cached
-		// summary without another listing.
-		var kept []restic.Snapshot
-		removed := 0
-		for _, g := range groups {
-			kept = append(kept, g.Keep...)
-			removed += len(g.Remove)
-		}
-		if err := m.storeSnapshots(record, t.repo, kept); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%d snapshots removed, %d kept", removed, len(kept)), nil
+		return m.forget(ctx, record, t.repo, dir, pw, jl)
 	case Prune:
-		if err := m.runner.Prune(ctx, dir, pw, restic.DefaultMaxUnused, jl); err != nil {
-			return "", err
-		}
-		return "pruned", nil
+		return m.prune(ctx, dir, pw, jl)
 	case Check:
-		if err := m.runner.Check(ctx, dir, pw, "", jl); err != nil {
-			return "", err
-		}
-		return "no errors found", nil
+		return m.check(ctx, dir, pw, "", jl)
+	case Maintenance:
+		return m.maintenance(ctx, record, t.repo, dir, pw, jl)
 	}
 	return "", fmt.Errorf("%w: %q", ErrUnknown, t.typ)
+}
+
+func (m *Manager) unlock(ctx context.Context, dir string, pw []byte, all bool, jl *jobLog) (string, error) {
+	n, err := m.runner.Unlock(ctx, dir, pw, all, jl)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d locks removed", n), nil
+}
+
+func (m *Manager) forget(ctx, record context.Context, repo, dir string, pw []byte, jl *jobLog) (string, error) {
+	p, _, err := m.store.RepoPolicy(record, repo)
+	if err != nil {
+		return "", err
+	}
+	jl.Printf(m.now(), "policy: %s", strings.Join(p.Args(), " "))
+	groups, err := m.runner.Forget(ctx, dir, pw, p, jl)
+	if err != nil {
+		return "", err
+	}
+	// The kept snapshots are all that is left: update the cached summary
+	// without another listing.
+	var kept []restic.Snapshot
+	removed := 0
+	for _, g := range groups {
+		kept = append(kept, g.Keep...)
+		removed += len(g.Remove)
+	}
+	if err := m.storeSnapshots(record, repo, kept); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d snapshots removed, %d kept", removed, len(kept)), nil
+}
+
+func (m *Manager) prune(ctx context.Context, dir string, pw []byte, jl *jobLog) (string, error) {
+	if err := m.runner.Prune(ctx, dir, pw, restic.DefaultMaxUnused, jl); err != nil {
+		return "", err
+	}
+	return "pruned", nil
+}
+
+func (m *Manager) check(ctx context.Context, dir string, pw []byte, subset string, jl *jobLog) (string, error) {
+	if err := m.runner.Check(ctx, dir, pw, subset, jl); err != nil {
+		return "", err
+	}
+	if subset != "" {
+		return "no errors found (data subset " + subset + ")", nil
+	}
+	return "no errors found", nil
+}
+
+// maintenance runs the steps of the repository's plan in order; a failed
+// step stops the plan. check reads the next data subset of the rotation,
+// which advances only when the check succeeded.
+func (m *Manager) maintenance(ctx, record context.Context, repo, dir string, pw []byte, jl *jobLog) (string, error) {
+	p, err := m.store.RepoPlan(record, repo)
+	if err != nil {
+		return "", err
+	}
+	var done []string
+	step := func(name string, run func() (string, error)) error {
+		jl.Printf(m.now(), "step %s", name)
+		summary, err := run()
+		if err != nil {
+			return fmt.Errorf("step %s: %w", name, err)
+		}
+		done = append(done, name+": "+summary)
+		return nil
+	}
+	steps := []struct {
+		on   bool
+		name string
+		run  func() (string, error)
+	}{
+		{p.Unlock, "unlock", func() (string, error) { return m.unlock(ctx, dir, pw, false, jl) }},
+		{p.Forget, "forget", func() (string, error) { return m.forget(ctx, record, repo, dir, pw, jl) }},
+		{p.Prune, "prune", func() (string, error) { return m.prune(ctx, dir, pw, jl) }},
+		{p.Check, "check", func() (string, error) {
+			subset := ""
+			if p.CheckSubsetT > 0 {
+				subset = fmt.Sprintf("%d/%d", p.CheckSubsetN, p.CheckSubsetT)
+			}
+			summary, err := m.check(ctx, dir, pw, subset, jl)
+			if err == nil && subset != "" {
+				err = m.store.AdvanceCheckSubset(record, repo)
+			}
+			return summary, err
+		}},
+	}
+	for _, s := range steps {
+		if !s.on {
+			continue
+		}
+		if err := step(s.name, s.run); err != nil {
+			if len(done) > 0 {
+				err = fmt.Errorf("%w (done before: %s)", err, strings.Join(done, "; "))
+			}
+			return "", err
+		}
+	}
+	if len(done) == 0 {
+		return "no steps enabled", nil
+	}
+	return strings.Join(done, "; "), nil
 }
