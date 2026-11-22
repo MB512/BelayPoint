@@ -187,6 +187,10 @@ func loadOrCreateCA(dir string, now time.Time) (*x509.Certificate, *ecdsa.Privat
 	certPath, keyPath := filepath.Join(dir, CACertFile), filepath.Join(dir, CAKeyFile)
 	if exists(certPath) || exists(keyPath) {
 		cert, key, err := loadPair(certPath, keyPath)
+		if errors.Is(err, fs.ErrPermission) {
+			return nil, nil, false, fmt.Errorf("loading CA: %w (the files belong to another user; "+
+				"run the container as their owner or chown the config directory)", err)
+		}
 		if err != nil {
 			return nil, nil, false, fmt.Errorf("loading CA (remove %s and %s to create a new one): %w", CACertFile, CAKeyFile, err)
 		}
