@@ -73,14 +73,14 @@ func newRunner(block bool) *fakeRunner {
 
 func (f *fakeRunner) CatConfig(context.Context, string, []byte) error { return nil }
 
-func (f *fakeRunner) ForgetPreview(_ context.Context, dir string, pw []byte, p restic.Policy) ([]restic.ForgetGroup, error) {
+func (f *fakeRunner) ForgetPreview(_ context.Context, dir string, pw []byte, p restic.Policy) ([]restic.PassResult, error) {
 	f.mu.Lock()
 	f.seenPW = append(f.seenPW, string(pw))
 	f.mu.Unlock()
-	return []restic.ForgetGroup{{Host: dir, Keep: make([]restic.Snapshot, p.KeepLast), Remove: make([]restic.Snapshot, 1)}}, nil
+	return []restic.PassResult{{Groups: []restic.ForgetGroup{{Host: dir, Keep: make([]restic.Snapshot, p.KeepLast), Remove: make([]restic.Snapshot, 1)}}}}, nil
 }
 
-func (f *fakeRunner) Forget(_ context.Context, _ string, pw []byte, p restic.Policy, log io.Writer) ([]restic.ForgetGroup, error) {
+func (f *fakeRunner) Forget(_ context.Context, _ string, pw []byte, p restic.Policy, log io.Writer) ([]restic.PassResult, error) {
 	f.mu.Lock()
 	f.seenPW = append(f.seenPW, string(pw))
 	err := f.err
@@ -88,10 +88,10 @@ func (f *fakeRunner) Forget(_ context.Context, _ string, pw []byte, p restic.Pol
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(log, "forget %s\n", strings.Join(p.Args(), " "))
-	return []restic.ForgetGroup{
-		{Keep: make([]restic.Snapshot, 1), Remove: make([]restic.Snapshot, 2)},
-		{Keep: make([]restic.Snapshot, 1), Remove: make([]restic.Snapshot, 1)},
+	fmt.Fprintf(log, "forget %s\n", p)
+	return []restic.PassResult{
+		{Tag: "pre-stop", Groups: []restic.ForgetGroup{{Keep: make([]restic.Snapshot, 1), Remove: make([]restic.Snapshot, 2)}}},
+		{Groups: []restic.ForgetGroup{{Keep: make([]restic.Snapshot, 1), Remove: make([]restic.Snapshot, 1)}}},
 	}, nil
 }
 
@@ -201,7 +201,7 @@ func (s *fakeStore) SetRepoSnapshots(_ context.Context, path string, count int, 
 
 func (s *fakeStore) RepoPolicy(_ context.Context, path string) (restic.Policy, bool, error) {
 	if path == "bob/main" {
-		return restic.Policy{KeepLast: 9}, true, nil
+		return restic.Policy{Keep: restic.Keep{KeepLast: 9}}, true, nil
 	}
 	return restic.DefaultPolicy, false, nil
 }
@@ -460,9 +460,9 @@ func TestUnlockJobLog(t *testing.T) {
 func TestPreviewForget(t *testing.T) {
 	e := newEnv(t, false, 1)
 	ctx := context.Background()
-	groups, err := e.m.PreviewForget(ctx, "alice/main", restic.Policy{KeepLast: 2})
-	if err != nil || len(groups) != 1 || len(groups[0].Keep) != 2 || !strings.HasSuffix(groups[0].Host, "alice/main") {
-		t.Fatalf("preview = %+v, %v", groups, err)
+	res, err := e.m.PreviewForget(ctx, "alice/main", restic.Policy{Keep: restic.Keep{KeepLast: 2}})
+	if err != nil || len(restic.Kept(res)) != 2 || !strings.HasSuffix(res[0].Groups[0].Host, "alice/main") {
+		t.Fatalf("preview = %+v, %v", res, err)
 	}
 	if _, err := e.m.PreviewForget(ctx, "dave/main", restic.DefaultPolicy); !errors.Is(err, ErrNoPassword) {
 		t.Errorf("no password: %v", err)
@@ -486,8 +486,8 @@ func TestMaintenanceJobs(t *testing.T) {
 		summary string
 		log     string
 	}{
-		{"bob/main", Forget, "3 snapshots removed, 2 kept", "forget --group-by host,paths --keep-last 9"},
-		{"alice/main", Forget, "3 snapshots removed, 2 kept", "--keep-daily 7 --keep-weekly 4"},
+		{"bob/main", Forget, "3 snapshots removed, 2 kept", "forget --keep-last 9"},
+		{"alice/main", Forget, "3 snapshots removed, 2 kept", "--keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 3; tag pre-stop: --keep-last 2"},
 		{"alice/main", Prune, "pruned", "prune --max-unused 5%"},
 		{"alice/main", Check, "no errors found", "check subset"},
 	} {

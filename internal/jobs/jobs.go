@@ -223,7 +223,7 @@ func (m *Manager) Submit(ctx context.Context, repo string, typ Type, trigger Tri
 // PreviewForget shows what forget with the policy would remove. It runs
 // right away, outside the queue: it is read-only and takes no lock
 // (--no-lock), so it cannot conflict with jobs or backups.
-func (m *Manager) PreviewForget(ctx context.Context, repo string, p restic.Policy) ([]restic.ForgetGroup, error) {
+func (m *Manager) PreviewForget(ctx context.Context, repo string, p restic.Policy) ([]restic.PassResult, error) {
 	if m.secrets.Sealed() {
 		return nil, ErrSealed
 	}
@@ -359,19 +359,14 @@ func (m *Manager) forget(ctx, record context.Context, repo, dir string, pw []byt
 	if err != nil {
 		return "", err
 	}
-	jl.Printf(m.now(), "policy: %s", strings.Join(p.Args(), " "))
-	groups, err := m.runner.Forget(ctx, dir, pw, p, jl)
+	jl.Printf(m.now(), "policy: %s", p)
+	results, err := m.runner.Forget(ctx, dir, pw, p, jl)
 	if err != nil {
 		return "", err
 	}
 	// The kept snapshots are all that is left: update the cached summary
 	// without another listing.
-	var kept []restic.Snapshot
-	removed := 0
-	for _, g := range groups {
-		kept = append(kept, g.Keep...)
-		removed += len(g.Remove)
-	}
+	kept, removed := restic.Kept(results), restic.Removed(results)
 	if err := m.storeSnapshots(record, repo, kept); err != nil {
 		return "", err
 	}
