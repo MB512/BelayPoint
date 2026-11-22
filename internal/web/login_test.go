@@ -88,7 +88,7 @@ func TestSetup(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := newEnv(nil, false)
+			e := newEnv(t, nil, false)
 			w := post(e.h, "/setup", "", url.Values{"setup_code": {tt.code}, "password": {tt.password}, "confirm": {tt.confirm}}, nil)
 			if w.Code != tt.wantStatus || !strings.Contains(w.Body.String(), tt.wantText) {
 				t.Errorf("got %d, want %d with %q:\n%s", w.Code, tt.wantStatus, tt.wantText, w.Body.String())
@@ -100,7 +100,7 @@ func TestSetup(t *testing.T) {
 	}
 
 	t.Run("only a wrong code counts as failed attempt", func(t *testing.T) {
-		e := newEnv(nil, false)
+		e := newEnv(t, nil, false)
 		post(e.h, "/setup", "", url.Values{"setup_code": {testSetupCode}, "password": {"short"}, "confirm": {"short"}}, nil)
 		post(e.h, "/setup", "", url.Values{"setup_code": {"wrong"}, "password": {pw}, "confirm": {pw}}, nil)
 		if got := e.limiter.Failures(); got != 1 {
@@ -109,7 +109,7 @@ func TestSetup(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		e := newEnv(nil, false)
+		e := newEnv(t, nil, false)
 		wantRedirect(t, getWithCookie(e.h, "/", ""), "/setup")
 		wantRedirect(t, getWithCookie(e.h, "/login", ""), "/setup")
 		if w := getWithCookie(e.h, "/setup", ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `name="setup_code"`) {
@@ -140,7 +140,7 @@ func TestSetup(t *testing.T) {
 }
 
 func TestLoginLogoutSeal(t *testing.T) {
-	e := newEnv(nil, true)
+	e := newEnv(t, nil, true)
 	wantRedirect(t, getWithCookie(e.h, "/", ""), "/login")
 	wantRedirect(t, getWithCookie(e.h, "/", "forged"), "/login")
 	if w := getWithCookie(e.h, "/login", ""); !strings.Contains(w.Body.String(), "sealed") {
@@ -204,7 +204,7 @@ func TestLoginLogoutSeal(t *testing.T) {
 }
 
 func TestLoginLockout(t *testing.T) {
-	e := newEnv(nil, true)
+	e := newEnv(t, nil, true)
 	for i := range 6 {
 		w := post(e.h, "/login", "", url.Values{"password": {"wrong password"}}, nil)
 		if w.Code != http.StatusUnauthorized {
@@ -222,7 +222,7 @@ func TestLoginLockout(t *testing.T) {
 }
 
 func TestPasswordsZeroed(t *testing.T) {
-	e := newEnv(nil, false)
+	e := newEnv(t, nil, false)
 	pw := "correct horse battery"
 	post(e.h, "/setup", "", url.Values{"setup_code": {testSetupCode}, "password": {pw}, "confirm": {pw}}, nil)
 	e.vault.Seal()
@@ -239,7 +239,7 @@ func TestPasswordsZeroed(t *testing.T) {
 }
 
 func TestCrossOriginPostRejected(t *testing.T) {
-	e := newEnv(nil, true)
+	e := newEnv(t, nil, true)
 	w := post(e.h, "/login", "", url.Values{"password": {"correct horse battery"}}, map[string]string{"Sec-Fetch-Site": "cross-site"})
 	if w.Code != http.StatusForbidden || !e.vault.Sealed() {
 		t.Errorf("cross-site login: %d, sealed %v", w.Code, e.vault.Sealed())
@@ -247,7 +247,7 @@ func TestCrossOriginPostRejected(t *testing.T) {
 }
 
 func TestBadFormRejected(t *testing.T) {
-	e := newEnv(nil, true)
+	e := newEnv(t, nil, true)
 	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/login", strings.NewReader(`{"password":"x"}`))
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -258,7 +258,7 @@ func TestBadFormRejected(t *testing.T) {
 }
 
 func TestAuditPage(t *testing.T) {
-	e := newEnv(nil, true)
+	e := newEnv(t, nil, true)
 	wantRedirect(t, getWithCookie(e.h, "/audit", ""), "/login")
 	w := post(e.h, "/login", "", url.Values{"password": {"correct horse battery"}}, nil)
 	cookie := sessionFromResponse(t, w)

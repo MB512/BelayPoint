@@ -31,6 +31,7 @@ import (
 	"github.com/MB512/belaypoint/internal/buildinfo"
 	"github.com/MB512/belaypoint/internal/config"
 	"github.com/MB512/belaypoint/internal/netguard"
+	"github.com/MB512/belaypoint/internal/repos"
 	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/tlscert"
 	"github.com/MB512/belaypoint/internal/vault"
@@ -90,6 +91,9 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 	}
 	defer func() { _ = db.Close() }()
 
+	scanner := &repos.Scanner{Root: cfg.ReposDir, Store: db, Logger: logger, Now: time.Now}
+	scanner.Start(ctx)
+
 	// The vault is opened (not unsealed) at startup, so a damaged file
 	// stops the start instead of being replaced by a new, empty vault.
 	vlt, err := vault.Open(filepath.Join(cfg.ConfigDir, "vault.json"))
@@ -148,6 +152,9 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			Limiter:       auth.NewLimiter(time.Now),
 			Audit:         auditor{db, logger},
 			AuditLog:      db,
+			Repos:         db,
+			Scanner:       rescanner{ctx, scanner},
+			ReposDir:      cfg.ReposDir,
 			Location:      cfg.Location,
 			SetupCode:     setupCode,
 		}),
@@ -182,6 +189,7 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Warn("shutdown", "err", err)
 	}
+	scanner.Wait() // ctx is cancelled, so a running scan stops soon
 	logger.Info("stopped")
 	return 0
 }
@@ -254,6 +262,16 @@ func (a auditor) Audit(ctx context.Context, event, details string) {
 		a.l.ErrorContext(ctx, "audit entry not stored", "event", event, "err", err)
 	}
 }
+
+// rescanner binds the scanner to the server's lifetime: a scan started
+// from the UI is cancelled on shutdown, not when its request ends.
+type rescanner struct {
+	ctx context.Context
+	s   *repos.Scanner
+}
+
+func (r rescanner) Rescan() bool   { return r.s.Start(r.ctx) }
+func (r rescanner) Scanning() bool { return r.s.Running() }
 
 // debugWriter sends the http.Server's internal log lines to slog at debug
 // level.

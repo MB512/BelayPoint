@@ -44,6 +44,7 @@ type Vault interface {
 	Create(password []byte) error
 	Unseal(password []byte) error
 	Seal()
+	Has(name string) bool
 }
 
 // Auditor records security-relevant events (docs/security.md, rule 12).
@@ -55,6 +56,18 @@ type Auditor interface {
 // AuditLog reads the audit log (implemented by *store.Store).
 type AuditLog interface {
 	ListAudit(ctx context.Context, limit int, before int64) ([]store.AuditEntry, error)
+}
+
+// RepoList lists the known repositories (implemented by *store.Store).
+type RepoList interface {
+	ListRepos(ctx context.Context) ([]store.Repo, error)
+}
+
+// Scanner runs repository discovery and disk usage in the background.
+type Scanner interface {
+	// Rescan starts a scan; false if one is already running.
+	Rescan() bool
+	Scanning() bool
 }
 
 // Options configure the handler.
@@ -72,6 +85,10 @@ type Options struct {
 	Limiter  *auth.Limiter
 	Audit    Auditor
 	AuditLog AuditLog
+	Repos    RepoList
+	Scanner  Scanner
+	// ReposDir is the repository root (BELAYPOINT_REPOS_DIR).
+	ReposDir string
 	// Location is the time zone for times shown in the UI (TZ).
 	Location *time.Location
 	// SetupCode must be entered to create the vault on first start (see
@@ -112,6 +129,7 @@ func New(opts Options) http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireSession)
 		r.Get("/", s.home)
+		r.Post("/repos/rescan", s.rescan)
 		r.Get("/audit", s.auditPage)
 		r.Post("/logout", s.logout)
 		r.Post("/seal", s.seal)
@@ -151,6 +169,9 @@ type page struct {
 	// audit page
 	Audit      []auditRow
 	NextBefore int64
+	// overview
+	Repos    []repoRow
+	Scanning bool
 }
 
 func (s *server) render(w http.ResponseWriter, status int, name string, p page) {

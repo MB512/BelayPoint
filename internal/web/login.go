@@ -294,7 +294,3 @@ func (s *server) seal(w http.ResponseWriter, r *http.Request) {
 	s.Audit.Audit(r.Context(), "seal", remote(r))
 	redirect(w, r, "/login")
 }
-
-func (s *server) home(w http.ResponseWriter, r *http.Request) {
-	s.render(w, http.StatusOK, "home.html", page{Title: "Overview", CSRF: sessionFrom(r.Context()).CSRF})
-}

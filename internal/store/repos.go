@@ -1,0 +1,88 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+
+	"github.com/MB512/belaypoint/internal/repos"
+)
+
+// Repo is a row of the repos table.
+type Repo struct {
+	Path      string
+	Missing   bool
+	FirstSeen time.Time
+	LastSeen  time.Time
+	// Usage is nil until the first disk usage walk finished.
+	Usage     *repos.Usage
+	UsageTime time.Time
+}
+
+// SyncRepos records the result of a discovery: paths are present (added
+// if new), every other known repository is marked missing.
+func (s *Store) SyncRepos(ctx context.Context, paths []string) error {
+	now := s.now().UnixMilli()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("syncing repositories: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `UPDATE repos SET missing = 1`); err != nil {
+		return fmt.Errorf("syncing repositories: %w", err)
+	}
+	for _, p := range paths {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO repos (path, missing, first_seen, last_seen) VALUES (?, 0, ?, ?)
+			 ON CONFLICT (path) DO UPDATE SET missing = 0, last_seen = excluded.last_seen`, p, now, now); err != nil {
+			return fmt.Errorf("syncing repository %q: %w", p, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("syncing repositories: %w", err)
+	}
+	return nil
+}
+
+// SetRepoUsage stores a disk usage measurement.
+func (s *Store) SetRepoUsage(ctx context.Context, path string, u repos.Usage, at time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE repos SET usage_bytes = ?, usage_files = ?, usage_time = ? WHERE path = ?`,
+		u.Bytes, u.Files, at.UnixMilli(), path)
+	if err != nil {
+		return fmt.Errorf("storing disk usage of %q: %w", path, err)
+	}
+	return nil
+}
+
+// ListRepos returns all known repositories, sorted by path.
+func (s *Store) ListRepos(ctx context.Context) ([]Repo, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT path, missing, first_seen, last_seen, usage_bytes, usage_files, usage_time FROM repos ORDER BY path`)
+	if err != nil {
+		return nil, fmt.Errorf("listing repositories: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Repo
+	for rows.Next() {
+		var r Repo
+		var first, last int64
+		// sql.Null* are like Nullable<T> in C#: Valid says whether the
+		// column was NULL.
+		var bytes, files, at sql.NullInt64
+		if err := rows.Scan(&r.Path, &r.Missing, &first, &last, &bytes, &files, &at); err != nil {
+			return nil, fmt.Errorf("listing repositories: %w", err)
+		}
+		r.FirstSeen, r.LastSeen = time.UnixMilli(first), time.UnixMilli(last)
+		if bytes.Valid {
+			r.Usage = &repos.Usage{Bytes: bytes.Int64, Files: files.Int64}
+			r.UsageTime = time.UnixMilli(at.Int64)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing repositories: %w", err)
+	}
+	return out, nil
+}

@@ -224,13 +224,17 @@ after that and BelayPoint's access can be revoked separately.
 hidden entries skipped). A directory is a repository if it contains a `config`
 file and the directories `data`, `index`, `keys`, `locks` and `snapshots`.
 Repositories are identified by their path relative to the root and mirrored
-into the database. Discovery runs at startup and on "Rescan".
+into the database; a repository that disappears is kept and marked missing.
+Discovery runs at startup and on "Rescan", in the background, followed by the
+disk usage walk of each repository (stored in the database). Before a
+repository directory is used, its path is checked again component by
+component: no symlink, no `..`, no hidden component.
 
 Per repository the UI shows:
 
 - disk usage (walk of the directory; works while sealed),
-- number and age of lock files (file names and modification times; works while
-  sealed),
+- number and age of lock files (file names and modification times, read live;
+  works while sealed; flagged when older than 24 hours),
 - snapshot count, newest snapshot, lock details (needs the password: lock files
   are encrypted),
 - maintenance plan, last runs and their results.
