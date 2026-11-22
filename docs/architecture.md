@@ -232,12 +232,18 @@ component: no symlink, no `..`, no hidden component.
 
 Per repository the UI shows:
 
-- disk usage (walk of the directory; works while sealed),
+- disk usage (walk of the directory; works while sealed) with a bar scaled
+  to the largest repository and its share of the total,
 - number and age of lock files (file names and modification times, read live;
   works while sealed; flagged when older than 24 hours),
 - snapshot count, newest snapshot, lock details (needs the password: lock files
   are encrypted),
 - maintenance plan, last runs and their results.
+
+Below that, a per-user summary (the user is the first path component, as with
+`--private-repos`) sums repositories, size and files, largest first, with a
+total. Missing repositories are not counted; repositories not measured yet
+are counted but marked, since their size is not in the sum.
 
 ## Users (`.htpasswd`)
 

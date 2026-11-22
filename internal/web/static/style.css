@@ -64,3 +64,7 @@ h2 { font-size: 1.2rem; margin-top: 2rem; }
 .actions a { margin-left: .75rem; }
 a.danger { color: var(--danger); }
 code.secret { display: inline-block; padding: .5rem .75rem; font-size: 1.1rem; background: var(--card); border: 1px solid var(--line); border-radius: 6px; user-select: all; }
+/* Size bars: <meter> because the CSP forbids inline style attributes. */
+td.bar, th.bar { width: 9rem; white-space: nowrap; }
+meter { width: 5rem; height: .6rem; vertical-align: middle; }
+tfoot th { color: var(--fg); border-bottom: 0; }

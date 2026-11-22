@@ -1,8 +1,10 @@
 package web
 
 import (
+	"cmp"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/MB512/belaypoint/internal/repos"
@@ -14,11 +16,15 @@ import (
 const StaleLockAge = 24 * time.Hour
 
 type repoRow struct {
-	Path     string
-	Owner    string
-	Missing  bool
-	Size     string // "" until measured
-	Files    int64
+	Path    string
+	Owner   string
+	Missing bool
+	Size    string // "" until measured
+	Bytes   int64
+	Files   int64
+	// Share is the repository's part of the total size ("12 %"); the bar
+	// is scaled to the largest repository.
+	Share    string
 	Measured string
 	Locks    int
 	// OldestLock is the age of the oldest lock file ("" if none);
@@ -49,6 +55,7 @@ func (s *server) home(w http.ResponseWriter, r *http.Request) {
 		}
 		if repo.Usage != nil {
 			row.Size = formatBytes(repo.Usage.Bytes)
+			row.Bytes = repo.Usage.Bytes
 			row.Files = repo.Usage.Files
 			row.Measured = repo.UsageTime.In(s.Location).Format("2006-01-02 15:04")
 		}
@@ -57,7 +64,83 @@ func (s *server) home(w http.ResponseWriter, r *http.Request) {
 		}
 		p.Repos = append(p.Repos, row)
 	}
+	p.Owners, p.Total = summarize(p.Repos)
+	for i := range p.Repos {
+		if p.Repos[i].Size != "" && !p.Repos[i].Missing {
+			p.Repos[i].Share = percent(p.Repos[i].Bytes, p.Total.Bytes)
+		}
+	}
 	s.render(w, http.StatusOK, "home.html", p)
+}
+
+// ownerRow is one line of the per-user summary; the total uses it too.
+type ownerRow struct {
+	Name     string
+	Repos    int
+	Bytes    int64
+	Size     string
+	Files    int64
+	Share    string
+	MaxBytes int64 // largest repository (total) or user (owner rows)
+	// Unmeasured counts repositories without disk usage yet; their size
+	// is not in the sum.
+	Unmeasured int
+}
+
+// summarize sums the present repositories per user, largest first, and in
+// total. Missing repositories are left out: their last usage is outdated.
+func summarize(rows []repoRow) ([]ownerRow, ownerRow) {
+	var total ownerRow
+	byName := map[string]*ownerRow{}
+	var owners []*ownerRow
+	for _, r := range rows {
+		if r.Missing {
+			continue
+		}
+		o := byName[r.Owner]
+		if o == nil {
+			o = &ownerRow{Name: r.Owner}
+			byName[r.Owner] = o
+			owners = append(owners, o)
+		}
+		for _, sum := range []*ownerRow{o, &total} {
+			sum.Repos++
+			if r.Size == "" {
+				sum.Unmeasured++
+				continue
+			}
+			sum.Bytes += r.Bytes
+			sum.Files += r.Files
+		}
+		total.MaxBytes = max(total.MaxBytes, r.Bytes)
+	}
+	// slices.SortFunc with a comparison func is like List.Sort(Comparison)
+	// in C#; cmp.Or picks the first non-zero result (then by name).
+	slices.SortFunc(owners, func(a, b *ownerRow) int {
+		return cmp.Or(cmp.Compare(b.Bytes, a.Bytes), cmp.Compare(a.Name, b.Name))
+	})
+	out := make([]ownerRow, 0, len(owners))
+	for _, o := range owners {
+		o.MaxBytes = owners[0].Bytes
+		o.Size = formatBytes(o.Bytes)
+		o.Share = percent(o.Bytes, total.Bytes)
+		out = append(out, *o)
+	}
+	total.Size = formatBytes(total.Bytes)
+	return out, total
+}
+
+// percent formats part/whole as a whole percentage; "< 1 %" for small
+// non-zero parts.
+func percent(part, whole int64) string {
+	if whole <= 0 {
+		return ""
+	}
+	p := part * 100 / whole
+	if p == 0 && part > 0 {
+		return "< 1 %"
+	}
+	return fmt.Sprintf("%d %%", p)
 }
 
 // addLocks reads the lock files of the repository live (one directory
