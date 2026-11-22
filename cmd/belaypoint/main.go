@@ -79,7 +79,7 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	logger.Info("starting BelayPoint", "version", buildinfo.Version)
-	checkOwner(logger, cfg.ReposDir)
+	checkOwner(ctx, logger, cfg.ReposDir)
 
 	if err := os.MkdirAll(cfg.ConfigDir, 0o700); err != nil {
 		logger.Error("config directory", "err", err)
@@ -233,27 +233,39 @@ func tlsConfig(cert tlscert.Result) *tls.Config {
 }
 
 // checkOwner warns if the process does not run as the owner of the
-// repository root: files written by prune must stay usable for the
-// rest-server (see "Container" in docs/architecture.md).
-func checkOwner(logger *slog.Logger, dir string) {
-	st, err := os.Stat(dir)
+// repository files: files written by prune must stay usable for the
+// rest-server (see "Container" in docs/architecture.md). The reference is
+// the config file of the first repository, i.e. the user the rest-server
+// writes as; without repositories it is the repository root itself.
+func checkOwner(ctx context.Context, logger *slog.Logger, dir string) {
+	ref := dir
+	if found, _, err := repos.Discover(ctx, dir); err == nil && len(found) > 0 {
+		ref = filepath.Join(dir, filepath.FromSlash(found[0]), "config")
+	}
+	st, err := os.Stat(ref)
 	if err != nil {
-		logger.Warn("repository directory not accessible", "dir", dir, "err", err)
+		logger.Warn("repository directory not accessible", "path", ref, "err", err)
 		return
 	}
 	sys, ok := st.Sys().(*syscall.Stat_t)
 	if !ok {
 		return
 	}
+	owner := fmt.Sprintf("%d:%d", sys.Uid, sys.Gid)
 	uid, gid := os.Getuid(), os.Getgid()
-	if uid == 0 {
-		logger.Warn("running as root: set the container user to the owner of the repository files", "owner", fmt.Sprintf("%d:%d", sys.Uid, sys.Gid))
+	if uint32(uid) == sys.Uid && uint32(gid) == sys.Gid { //nolint:gosec // uid/gid are small non-negative ids
+		if uid == 0 {
+			logger.Info("running as root, like the owner of the repository files", "path", ref)
+		}
 		return
 	}
-	if uint32(uid) != sys.Uid || uint32(gid) != sys.Gid { //nolint:gosec // uid/gid are small non-negative ids
-		logger.Warn("container user differs from the owner of the repository directory; files written by prune may become unusable for the rest-server",
-			"user", fmt.Sprintf("%d:%d", uid, gid), "owner", fmt.Sprintf("%d:%d", sys.Uid, sys.Gid), "dir", dir)
+	if uid == 0 {
+		logger.Warn("running as root, but the repository files belong to another user; set the container user to their owner",
+			"owner", owner, "path", ref)
+		return
 	}
+	logger.Warn("container user differs from the owner of the repository files; files written by prune may become unusable for the rest-server",
+		"user", fmt.Sprintf("%d:%d", uid, gid), "owner", owner, "path", ref)
 }
 
 // auditor writes audit entries to the database and, for `docker logs`,
