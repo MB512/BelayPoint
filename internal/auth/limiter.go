@@ -37,7 +37,7 @@ func NewLimiter(now func() time.Time) *Limiter {
 // Begin reserves the one attempt slot. If it returns ok == false, the
 // caller must reject the attempt without checking the password; wait is
 // the remaining lockout (zero if another attempt is just running).
-// Otherwise the caller must call End exactly once.
+// Otherwise the caller must call End or Abort exactly once.
 func (l *Limiter) Begin() (wait time.Duration, ok bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -73,6 +73,14 @@ func (l *Limiter) End(success bool) time.Duration {
 	d = min(d, MaxLockout)
 	l.until = l.now().Add(d)
 	return d
+}
+
+// Abort ends the attempt started with Begin without counting it, for
+// requests rejected before the secret was checked (e.g. a malformed form).
+func (l *Limiter) Abort() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.busy = false
 }
 
 // Failures returns the number of failures since the last success.

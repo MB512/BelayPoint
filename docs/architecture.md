@@ -200,8 +200,15 @@ key check. Consequences:
 - "Seal now" in the UI or a restart zeroes the key. A job that already got
   its password finishes; the next one is refused.
 - Changing the admin password re-encrypts the vault with a new salt.
-- On first start (no `vault.json`) the UI asks for the admin password once and
-  creates the vault.
+- On first start (no `vault.json`) BelayPoint prints a one-time **setup
+  code** to the container log. The setup page asks for that code and the
+  admin password and creates the vault. Without the code, someone on the LAN
+  who reaches the page first could take over the instance.
+- There is no password recovery. A lost admin password means deleting
+  `vault.json` and setting up again; the repository passwords must then be
+  entered again.
+- "Log out" ends one browser session; the vault stays unsealed and scheduled
+  jobs keep running. "Seal now" zeroes the key and ends all sessions.
 
 Sessions are kept in memory only; a restart logs everybody out.
 

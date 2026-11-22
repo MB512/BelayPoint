@@ -1,23 +1,108 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/MB512/belaypoint/internal/auth"
+	"github.com/MB512/belaypoint/internal/vault"
 )
 
-func handler(caPEM []byte) http.Handler {
-	return New(Options{
+// fakeVault implements Vault with a plain password.
+type fakeVault struct {
+	mu       sync.Mutex
+	password []byte // nil: not initialized
+	sealed   bool
+	// seen are the password slices passed in, to check they get zeroed.
+	seen [][]byte
+}
+
+func (v *fakeVault) Initialized() bool { v.mu.Lock(); defer v.mu.Unlock(); return v.password != nil }
+func (v *fakeVault) Sealed() bool      { v.mu.Lock(); defer v.mu.Unlock(); return v.sealed }
+func (v *fakeVault) Seal()             { v.mu.Lock(); defer v.mu.Unlock(); v.sealed = true }
+
+func (v *fakeVault) Create(pw []byte) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.seen = append(v.seen, pw)
+	if v.password != nil {
+		return vault.ErrInitialized
+	}
+	v.password, v.sealed = bytes.Clone(pw), false
+	return nil
+}
+
+func (v *fakeVault) Unseal(pw []byte) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.seen = append(v.seen, pw)
+	if v.password == nil {
+		return vault.ErrNotInitialized
+	}
+	if !bytes.Equal(pw, v.password) {
+		return vault.ErrWrongPassword
+	}
+	v.sealed = false
+	return nil
+}
+
+// recorder collects audit events.
+type recorder struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (r *recorder) Audit(_ context.Context, event, _ string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, event)
+}
+
+func (r *recorder) has(event string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Contains(r.events, event)
+}
+
+type testEnv struct {
+	h       http.Handler
+	vault   *fakeVault
+	audit   *recorder
+	limiter *auth.Limiter
+}
+
+const testSetupCode = "ABCD-EFGH-JKMN-PQRS"
+
+func newEnv(caPEM []byte, initialized bool) *testEnv {
+	e := &testEnv{vault: &fakeVault{}, audit: &recorder{}, limiter: auth.NewLimiter(time.Now)}
+	code := testSetupCode
+	if initialized {
+		e.vault.password, e.vault.sealed, code = []byte("correct horse battery"), true, ""
+	}
+	e.h = New(Options{
 		Version:       "test",
 		CAPEM:         caPEM,
 		CAFingerprint: "AB:CD",
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Vault:         e.vault,
+		Sessions:      auth.NewSessions(time.Hour, time.Now),
+		Limiter:       e.limiter,
+		Audit:         e.audit,
+		SetupCode:     code,
 	})
+	return e
 }
+
+func handler(caPEM []byte) http.Handler { return newEnv(caPEM, true).h }
 
 func get(h http.Handler, path string, header map[string]string) *httptest.ResponseRecorder {
 	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil)
@@ -50,15 +135,22 @@ func TestCADownload(t *testing.T) {
 	}
 }
 
-func TestIndexShowsFingerprint(t *testing.T) {
-	w := get(handler([]byte("x")), "/", nil)
+func TestLoginPageShowsFingerprint(t *testing.T) {
+	w := get(handler([]byte("x")), "/login", nil)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "AB:CD") {
 		t.Errorf("got %d %q", w.Code, w.Body.String())
 	}
 }
 
+func TestStaticCSS(t *testing.T) {
+	w := get(handler(nil), "/static/style.css", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Content-Type"), "text/css") {
+		t.Errorf("got %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
+}
+
 func TestSecurityHeaders(t *testing.T) {
-	w := get(handler(nil), "/", nil)
+	w := get(handler(nil), "/login", nil)
 	for _, h := range []string{"Content-Security-Policy", "Cache-Control", "X-Content-Type-Options", "X-Frame-Options"} {
 		if w.Header().Get(h) == "" {
 			t.Errorf("missing %s", h)

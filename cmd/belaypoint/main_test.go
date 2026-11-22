@@ -77,7 +77,7 @@ func TestServeEndToEnd(t *testing.T) {
 	if !strings.Contains(logBuf.String(), "sha256=") {
 		t.Errorf("fingerprints not logged:\n%s", logBuf.String())
 	}
-	if !strings.Contains(logBuf.String(), "vault: not initialized") {
+	if !strings.Contains(logBuf.String(), "setup_code=") {
 		t.Errorf("vault state not logged:\n%s", logBuf.String())
 	}
 

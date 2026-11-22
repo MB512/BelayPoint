@@ -1,0 +1,39 @@
+{{define "top"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · BelayPoint</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+<span class="brand">BelayPoint</span>
+{{if .CSRF}}
+<nav>
+<form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit" class="link" title="End this session; the vault stays unsealed and scheduled jobs keep running">Log out</button></form>
+<form method="post" action="/seal"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit" class="danger" title="Forget the vault key and end all sessions; nothing runs until the next login">Seal now</button></form>
+</nav>
+{{end}}
+</header>
+<main>
+<h1>{{.Title}}</h1>
+{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+{{end}}
+
+{{define "ca"}}{{if .HasCA}}
+<details class="ca">
+<summary>Browser warns about the certificate?</summary>
+<p>BelayPoint uses its own local certificate authority. <a href="/ca.crt">Download the CA certificate</a>
+and import it into your browser as a trusted authority. Before importing, compare its SHA-256
+fingerprint with the one in the container log:</p>
+<p><code>{{.CAFingerprint}}</code></p>
+</details>
+{{end}}{{end}}
+
+{{define "bottom"}}
+</main>
+<footer><small>BelayPoint {{.Version}}</small></footer>
+</body>
+</html>
+{{end}}

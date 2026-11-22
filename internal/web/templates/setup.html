@@ -1,0 +1,22 @@
+{{template "top" .}}
+<p>Welcome. Choose the admin password. It protects the vault in which BelayPoint stores
+the repository passwords: the vault key is derived from it and never stored.</p>
+<p class="warn"><strong>There is no password recovery.</strong> If you lose this password, delete
+<code>vault.json</code> in the config directory and set BelayPoint up again; the repository
+passwords must then be entered again.</p>
+<form method="post" action="/setup" class="stack">
+<label>Setup code
+<input name="setup_code" required autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX" autofocus>
+<small>Printed in the container log, e.g. <code>docker logs belaypoint</code>.</small>
+</label>
+<label>Admin password
+<input type="password" name="password" required minlength="{{.MinPassword}}" maxlength="{{.MaxPassword}}" autocomplete="new-password">
+<small>{{.MinPassword}} to {{.MaxPassword}} characters. A long passphrase is best.</small>
+</label>
+<label>Repeat password
+<input type="password" name="confirm" required minlength="{{.MinPassword}}" maxlength="{{.MaxPassword}}" autocomplete="new-password">
+</label>
+<button type="submit">Create vault</button>
+</form>
+{{template "ca" .}}
+{{template "bottom" .}}

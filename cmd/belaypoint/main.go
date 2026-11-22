@@ -27,6 +27,7 @@ import (
 	"time"
 	_ "time/tzdata" // embeds the time zone database: TZ works without /usr/share/zoneinfo
 
+	"github.com/MB512/belaypoint/internal/auth"
 	"github.com/MB512/belaypoint/internal/buildinfo"
 	"github.com/MB512/belaypoint/internal/config"
 	"github.com/MB512/belaypoint/internal/netguard"
@@ -84,10 +85,15 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 		logger.Error("vault", "err", err)
 		return 1
 	}
+	var setupCode string
 	if vlt.Initialized() {
 		logger.Info("vault: sealed, log in to unseal", "secrets", len(vlt.Names()))
 	} else {
-		logger.Info("vault: not initialized, set the admin password in the web UI")
+		if setupCode, err = auth.NewSetupCode(); err != nil {
+			logger.Error("vault", "err", err)
+			return 1
+		}
+		logger.Warn("vault: not initialized; open the web UI, enter this setup code and choose the admin password", "setup_code", setupCode)
 	}
 
 	var ips []netip.Addr
@@ -125,6 +131,11 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			CAPEM:         cert.CAPEM,
 			CAFingerprint: cert.CAFingerprint,
 			Logger:        logger,
+			Vault:         vlt,
+			Sessions:      auth.NewSessions(cfg.SessionTTL, time.Now),
+			Limiter:       auth.NewLimiter(time.Now),
+			Audit:         logAudit{logger},
+			SetupCode:     setupCode,
 		}),
 		TLSConfig:         tlsConfig(cert),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -212,6 +223,14 @@ func checkOwner(logger *slog.Logger, dir string) {
 		logger.Warn("container user differs from the owner of the repository directory; files written by prune may become unusable for the rest-server",
 			"user", fmt.Sprintf("%d:%d", uid, gid), "owner", fmt.Sprintf("%d:%d", sys.Uid, sys.Gid), "dir", dir)
 	}
+}
+
+// logAudit writes audit entries to the log.
+// TODO: store them in the SQLite audit table once internal/store exists.
+type logAudit struct{ l *slog.Logger }
+
+func (a logAudit) Audit(ctx context.Context, event, details string) {
+	a.l.InfoContext(ctx, "audit", "event", event, "details", details)
 }
 
 // debugWriter sends the http.Server's internal log lines to slog at debug

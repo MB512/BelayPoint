@@ -160,7 +160,18 @@ func TestLimiterOneAttemptAtATime(t *testing.T) {
 	}
 	l.End(true)
 	if _, ok := l.Begin(); !ok {
-		t.Error("Begin refused after End")
+		t.Fatal("Begin refused after End")
+	}
+	l.End(false)
+	if _, ok := l.Begin(); !ok {
+		t.Fatal("Begin refused")
+	}
+	l.Abort()
+	if l.Failures() != 1 {
+		t.Errorf("Failures after Abort = %d, want 1 (not counted, not reset)", l.Failures())
+	}
+	if _, ok := l.Begin(); !ok {
+		t.Error("Begin refused after Abort")
 	}
 }
 
