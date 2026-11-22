@@ -31,6 +31,7 @@ import (
 	"github.com/MB512/belaypoint/internal/buildinfo"
 	"github.com/MB512/belaypoint/internal/config"
 	"github.com/MB512/belaypoint/internal/netguard"
+	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/tlscert"
 	"github.com/MB512/belaypoint/internal/vault"
 	"github.com/MB512/belaypoint/internal/web"
@@ -77,6 +78,17 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	logger.Info("starting BelayPoint", "version", buildinfo.Version)
 	checkOwner(logger, cfg.ReposDir)
+
+	if err := os.MkdirAll(cfg.ConfigDir, 0o700); err != nil {
+		logger.Error("config directory", "err", err)
+		return 1
+	}
+	db, err := store.Open(ctx, filepath.Join(cfg.ConfigDir, "belaypoint.db"))
+	if err != nil {
+		logger.Error("database", "err", err)
+		return 1
+	}
+	defer func() { _ = db.Close() }()
 
 	// The vault is opened (not unsealed) at startup, so a damaged file
 	// stops the start instead of being replaced by a new, empty vault.
@@ -134,7 +146,7 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			Vault:         vlt,
 			Sessions:      auth.NewSessions(cfg.SessionTTL, time.Now),
 			Limiter:       auth.NewLimiter(time.Now),
-			Audit:         logAudit{logger},
+			Audit:         auditor{db, logger},
 			SetupCode:     setupCode,
 		}),
 		TLSConfig:         tlsConfig(cert),
@@ -225,12 +237,20 @@ func checkOwner(logger *slog.Logger, dir string) {
 	}
 }
 
-// logAudit writes audit entries to the log.
-// TODO: store them in the SQLite audit table once internal/store exists.
-type logAudit struct{ l *slog.Logger }
+// auditor writes audit entries to the database and, for `docker logs`,
+// to the log.
+type auditor struct {
+	db *store.Store
+	l  *slog.Logger
+}
 
-func (a logAudit) Audit(ctx context.Context, event, details string) {
+func (a auditor) Audit(ctx context.Context, event, details string) {
 	a.l.InfoContext(ctx, "audit", "event", event, "details", details)
+	// The request may be cancelled (client gone) after the action itself
+	// happened; the entry is written anyway.
+	if err := a.db.AddAudit(context.WithoutCancel(ctx), event, details); err != nil {
+		a.l.ErrorContext(ctx, "audit entry not stored", "event", event, "err", err)
+	}
 }
 
 // debugWriter sends the http.Server's internal log lines to slog at debug
