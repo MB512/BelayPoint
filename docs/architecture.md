@@ -34,7 +34,10 @@ Recommended runtime settings (see `deploy/compose.example.yml`):
 - `user:` the UID/GID that owns the repository files (the same user the
   rest-server runs as). Files written by `prune` must stay readable and
   writable for the rest-server. At startup BelayPoint compares its UID/GID with
-  the owner of `/repos` and logs a warning on mismatch.
+  the owner of the first repository's `config` file (the user the rest-server
+  writes as; `/repos` itself if there is no repository yet) and logs a
+  warning on mismatch. A rest-server without `user:` runs as root; then
+  BelayPoint must run as root too (`user: "0:0"`).
 - `read_only: true`, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`,
   `tmpfs: /tmp`.
 - `mem_limit` equal to `memswap_limit`, so the container cannot swap (secrets
@@ -132,7 +135,11 @@ Strict mode is recommended: in default mode a request from another container
 (e.g. cloudflared, `172.18.0.x`) would be accepted because its address is
 private. With Docker's userland proxy (IPv6 on published ports, hairpin NAT)
 the source address can be replaced by the bridge gateway; publishing the port
-only on the LAN IPv4 address avoids that path. The filter is defense in depth,
+only on the LAN IPv4 address avoids that path. Some NAS systems (seen on
+Synology DSM) replace it even then: the log shows dropped connections from
+`172.x.0.1`, and BelayPoint adds a hint. Then run the container with
+`network_mode: host` (without `ports:` and `networks:`). Never allow the
+gateway address: every forwarded connection would carry it. The filter is defense in depth,
 not a replacement for keeping the port off the internet.
 
 ## TLS

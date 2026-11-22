@@ -8,7 +8,10 @@
 # - Mount the rest-server's data DIRECTORY (not .htpasswd alone): the file is
 #   replaced atomically, a single-file mount would keep the old inode.
 # - Run BelayPoint as the same user as the rest-server, so files written by
-#   prune stay usable for it.
+#   prune stay usable for it (a rest-server without user: runs as root).
+# - If the log shows dropped connections from 172.x.0.1 (Docker replaced the
+#   client address, seen on Synology), replace ports: and networks: of
+#   belaypoint with network_mode: host.
 
 services:
   rest-server:

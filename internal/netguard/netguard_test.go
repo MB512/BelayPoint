@@ -180,3 +180,21 @@ func (c *lineCounter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+func TestDockerGateway(t *testing.T) {
+	for _, c := range []struct {
+		addr string
+		want bool
+	}{
+		{"172.20.0.1", true},
+		{"::ffff:172.17.0.1", true},
+		{"172.20.0.5", false},
+		{"172.32.0.1", false},
+		{"192.168.188.20", false},
+		{"fd00::1", false},
+	} {
+		if got := dockerGateway(netip.MustParseAddr(c.addr)); got != c.want {
+			t.Errorf("dockerGateway(%s) = %v, want %v", c.addr, got, c.want)
+		}
+	}
+}

@@ -134,8 +134,30 @@ func RejectLogger(log *slog.Logger, interval time.Duration) func(netip.AddrPort)
 		last[ap.Addr()] = now
 		mu.Unlock()
 		log.Warn("connection from a network that is not allowed was dropped",
-			"remote", ap.Addr().String(), "hint", "see BELAYPOINT_LAN_ADDRESS / BELAYPOINT_ALLOW_CIDRS")
+			"remote", ap.Addr().String(), "hint", dropHint(ap.Addr()))
 	}
+}
+
+// dockerGateway matches the gateway addresses of Docker's default address
+// pools (x.y.0.1 in 172.16.0.0/12).
+func dockerGateway(a netip.Addr) bool {
+	a = a.Unmap()
+	if !a.Is4() || !netip.MustParsePrefix("172.16.0.0/12").Contains(a) {
+		return false
+	}
+	b := a.As4()
+	return b[2] == 0 && b[3] == 1
+}
+
+// dropHint explains a dropped connection. A Docker bridge gateway as source
+// usually means Docker replaced the client's address (userland proxy or
+// NAT); allowing that address would allow everybody.
+func dropHint(a netip.Addr) string {
+	if dockerGateway(a) {
+		return "this looks like a Docker bridge gateway: Docker replaced the client's address; " +
+			"use network_mode: host instead of allowing this address (see docs/architecture.md, Network access)"
+	}
+	return "see BELAYPOINT_LAN_ADDRESS / BELAYPOINT_ALLOW_CIDRS"
 }
 
 // cloudflareHeaders are set by Cloudflare on requests that came through its
