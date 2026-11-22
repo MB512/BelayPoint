@@ -278,3 +278,65 @@ func restic016(version string) bool {
 	minor, _ := strconv.Atoi(parts[1])
 	return parts[0] == "0" && minor < 17
 }
+
+func TestParseUnlock(t *testing.T) {
+	for in, want := range map[string]int{
+		"successfully removed 3 locks\n": 3,
+		"successfully removed 1 lock\n":  1,
+		"":                               0,
+	} {
+		if got := parseUnlock([]byte(in)); got != want {
+			t.Errorf("parseUnlock(%q) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+// TestRealUnlock leaves a lock behind with a restic process that is
+// killed, then removes it as stale.
+func TestRealUnlock(t *testing.T) {
+	if _, err := exec.LookPath("restic"); err != nil {
+		t.Skip("restic not installed")
+	}
+	c, err := New(t.TempDir(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "repo")
+	pw := []byte("pw")
+	if err := c.run(ctx, dir, pw, []string{"init"}, io.Discard, nil); err != nil {
+		t.Fatal(err)
+	}
+	// A lock file written as restic does it would need the repository key;
+	// instead let a real restic hold a lock and kill it.
+	lockCtx, kill := context.WithCancel(ctx)
+	c2 := *c
+	c2.StopTimeout = time.Millisecond // SIGINT, then SIGKILL almost at once
+	started := make(chan error, 1)
+	go func() {
+		started <- c2.run(lockCtx, dir, pw, []string{"backup", "--stdin", "--stdin-filename", "x"}, io.Discard, nil)
+	}()
+	locks := filepath.Join(dir, "locks")
+	for range 500 {
+		if entries, _ := os.ReadDir(locks); len(entries) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	kill()
+	if err := <-started; err == nil {
+		t.Log("backup finished before it was killed")
+	}
+	entries, _ := os.ReadDir(locks)
+	if len(entries) == 0 {
+		t.Skip("restic removed its lock in time; nothing stale to test")
+	}
+	var log bytes.Buffer
+	n, err := c.Unlock(ctx, dir, pw, false, &log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(entries) || !strings.Contains(log.String(), "removed") {
+		t.Errorf("removed %d of %d, log %q", n, len(entries), log.String())
+	}
+}

@@ -46,6 +46,10 @@ type Runner interface {
 	CatConfig(ctx context.Context, dir string, password []byte) error
 	// Snapshots lists all snapshots without taking a lock.
 	Snapshots(ctx context.Context, dir string, password []byte) ([]Snapshot, error)
+	// Unlock removes stale locks, or with removeAll every lock (also
+	// those of running backups). restic's output goes to log. It returns
+	// the number of removed locks.
+	Unlock(ctx context.Context, dir string, password []byte, removeAll bool, log io.Writer) (int, error)
 }
 
 // Error is a failed restic run.
