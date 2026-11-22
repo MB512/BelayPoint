@@ -31,6 +31,7 @@ import (
 	"github.com/MB512/belaypoint/internal/buildinfo"
 	"github.com/MB512/belaypoint/internal/config"
 	"github.com/MB512/belaypoint/internal/htpasswd"
+	"github.com/MB512/belaypoint/internal/jobs"
 	"github.com/MB512/belaypoint/internal/netguard"
 	"github.com/MB512/belaypoint/internal/repos"
 	"github.com/MB512/belaypoint/internal/restic"
@@ -103,7 +104,12 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 	scanner := &repos.Scanner{Root: cfg.ReposDir, Store: db, Logger: logger, Now: time.Now}
 	scanner.Start(ctx)
 
-	resticCLI := openRestic(ctx, logger, cfg)
+	if n, err := db.InterruptJobs(ctx, time.Now()); err != nil {
+		logger.Error("database", "err", err)
+		return 1
+	} else if n > 0 {
+		logger.Warn("jobs of the previous run were interrupted", "jobs", n)
+	}
 
 	// The vault is opened (not unsealed) at startup, so a damaged file
 	// stops the start instead of being replaced by a new, empty vault.
@@ -121,6 +127,24 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			return 1
 		}
 		logger.Warn("vault: not initialized; open the web UI, enter this setup code and choose the admin password", "setup_code", setupCode)
+	}
+
+	// Without restic, passwords cannot be checked and no jobs run; the
+	// interfaces stay nil (not a nil *restic.CLI inside an interface,
+	// which would not compare equal to nil: a Go pitfall with no C#
+	// counterpart).
+	var (
+		checker   web.Restic
+		jobRunner web.Jobs
+		manager   *jobs.Manager
+	)
+	if cli := openRestic(ctx, logger, cfg); cli != nil {
+		manager = jobs.New(jobs.Options{
+			Root: cfg.ReposDir, Runner: cli, Secrets: vlt, Store: db,
+			Logger: logger, Now: time.Now, MaxJobs: cfg.MaxJobs,
+		})
+		manager.Run(ctx)
+		checker, jobRunner = cli, manager
 	}
 
 	var ips []netip.Addr
@@ -166,7 +190,9 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			Repos:         db,
 			Users:         users,
 			Scanner:       rescanner{ctx, scanner},
-			Restic:        resticCLI,
+			Restic:        checker,
+			Jobs:          jobRunner,
+			JobList:       db,
 			ReposDir:      cfg.ReposDir,
 			Location:      cfg.Location,
 			SetupCode:     setupCode,
@@ -202,7 +228,12 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Warn("shutdown", "err", err)
 	}
-	scanner.Wait() // ctx is cancelled, so a running scan stops soon
+	// ctx is cancelled: a running scan stops soon, running restic jobs get
+	// SIGINT. Both still write to the database, which is closed after this.
+	if manager != nil {
+		manager.Wait()
+	}
+	scanner.Wait()
 	logger.Info("stopped")
 	return 0
 }
@@ -238,10 +269,8 @@ func tlsConfig(cert tlscert.Result) *tls.Config {
 
 // openRestic prepares the restic runner with its cache in the config
 // directory. Without restic BelayPoint still starts (overview, users), so
-// the result is nil then. It returns the interface type on purpose: a nil
-// *restic.CLI stored in an interface would not compare equal to nil (a
-// classic Go pitfall without a C# counterpart).
-func openRestic(ctx context.Context, logger *slog.Logger, cfg config.Config) web.Restic {
+// the result is nil then.
+func openRestic(ctx context.Context, logger *slog.Logger, cfg config.Config) *restic.CLI {
 	cacheDir := filepath.Join(cfg.ConfigDir, "cache")
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		logger.Error("restic cache directory", "err", err)

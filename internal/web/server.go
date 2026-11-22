@@ -90,8 +90,11 @@ type Options struct {
 	Repos    RepoList
 	Users    Users
 	Scanner  Scanner
-	// Restic checks repository passwords; nil when restic is missing.
-	Restic Restic
+	// Restic checks repository passwords; Jobs runs restic jobs. Both are
+	// nil when restic is missing.
+	Restic  Restic
+	Jobs    Jobs
+	JobList JobList
 	// ReposDir is the repository root (BELAYPOINT_REPOS_DIR).
 	ReposDir string
 	// Location is the time zone for times shown in the UI (TZ).
@@ -138,6 +141,8 @@ func New(opts Options) http.Handler {
 		r.Get("/repos/password", s.repoPasswordPage)
 		r.Post("/repos/password", s.setRepoPassword)
 		r.Post("/repos/password/remove", s.forgetRepoPassword)
+		r.Post("/repos/snapshots", s.refreshSnapshots)
+		r.Get("/jobs", s.jobsPage)
 		r.Get("/users", s.usersPage)
 		r.Post("/users/add", s.addUser)
 		r.Get("/users/reset", s.confirmUser("reset"))
@@ -192,6 +197,9 @@ type page struct {
 	Users *usersData
 	// repository password page
 	RepoPassword *repoPasswordData
+	// jobs page; JobsAvailable is false without restic
+	Jobs          []jobRow
+	JobsAvailable bool
 }
 
 func (s *server) render(w http.ResponseWriter, status int, name string, p page) {

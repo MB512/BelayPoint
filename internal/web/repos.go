@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/MB512/belaypoint/internal/repos"
@@ -33,11 +34,20 @@ type repoRow struct {
 	StaleLock  bool
 	LockError  bool
 	Password   bool
+	// Snapshots is "" until listed; SnapshotsTitle says when.
+	Snapshots      string
+	SnapshotsTitle string
+	// Busy: a job for this repository is queued or running.
+	Busy bool
 }
 
 // home is the overview: all known repositories with what can be read
 // without their password.
 func (s *server) home(w http.ResponseWriter, r *http.Request) {
+	s.renderHome(w, r, http.StatusOK, "")
+}
+
+func (s *server) renderHome(w http.ResponseWriter, r *http.Request, status int, errMsg string) {
 	list, err := s.Repos.ListRepos(r.Context())
 	if err != nil {
 		s.Logger.Error("listing repositories", "err", err)
@@ -45,7 +55,10 @@ func (s *server) home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	p := page{Title: "Overview", CSRF: sessionFrom(r.Context()).CSRF, Scanning: s.Scanner.Scanning()}
+	p := page{
+		Title: "Overview", CSRF: sessionFrom(r.Context()).CSRF, Error: errMsg,
+		Scanning: s.Scanner.Scanning(), JobsAvailable: s.Jobs != nil,
+	}
 	for _, repo := range list {
 		row := repoRow{
 			Path:     repo.Path,
@@ -59,8 +72,16 @@ func (s *server) home(w http.ResponseWriter, r *http.Request) {
 			row.Files = repo.Usage.Files
 			row.Measured = repo.UsageTime.In(s.Location).Format("2006-01-02 15:04")
 		}
+		if sn := repo.Snapshots; sn != nil {
+			row.Snapshots = strconv.Itoa(sn.Count)
+			if !sn.Newest.IsZero() {
+				row.Snapshots += ", newest " + formatAge(now.Sub(sn.Newest)) + " ago"
+			}
+			row.SnapshotsTitle = "listed " + sn.Time.In(s.Location).Format("2006-01-02 15:04")
+		}
 		if !repo.Missing {
 			s.addLocks(&row, now)
+			row.Busy = s.Jobs != nil && s.Jobs.Busy(repo.Path)
 		}
 		p.Repos = append(p.Repos, row)
 	}
@@ -70,7 +91,7 @@ func (s *server) home(w http.ResponseWriter, r *http.Request) {
 			p.Repos[i].Share = percent(p.Repos[i].Bytes, p.Total.Bytes)
 		}
 	}
-	s.render(w, http.StatusOK, "home.html", p)
+	s.render(w, status, "home.html", p)
 }
 
 // ownerRow is one line of the per-user summary; the total uses it too.

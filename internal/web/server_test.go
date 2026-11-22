@@ -17,6 +17,7 @@ import (
 
 	"github.com/MB512/belaypoint/internal/auth"
 	"github.com/MB512/belaypoint/internal/htpasswd"
+	"github.com/MB512/belaypoint/internal/jobs"
 	"github.com/MB512/belaypoint/internal/restic"
 	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/vault"
@@ -151,6 +152,26 @@ func (f *fakeRestic) CatConfig(_ context.Context, dir string, pw []byte) error {
 	return nil
 }
 
+// fakeJobs records submitted jobs.
+type fakeJobs struct {
+	mu        sync.Mutex
+	submitted []string
+	busy      map[string]bool
+	err       error
+}
+
+func (f *fakeJobs) Submit(_ context.Context, repo string, typ jobs.Type, _ jobs.Trigger) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return 0, f.err
+	}
+	f.submitted = append(f.submitted, string(typ)+" "+repo)
+	return int64(len(f.submitted)), nil
+}
+
+func (f *fakeJobs) Busy(repo string) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.busy[repo] }
+
 func (v *fakeVault) Has(name string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -165,6 +186,7 @@ type testEnv struct {
 	store    *store.Store
 	scanner  *fakeScanner
 	restic   *fakeRestic
+	jobs     *fakeJobs
 	reposDir string
 	opts     Options
 }
@@ -180,7 +202,7 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 	t.Cleanup(func() { _ = db.Close() })
 	e := &testEnv{
 		vault: &fakeVault{}, audit: &recorder{}, limiter: auth.NewLimiter(time.Now),
-		store: db, scanner: &fakeScanner{}, restic: &fakeRestic{password: "repo secret"}, reposDir: t.TempDir(),
+		store: db, scanner: &fakeScanner{}, restic: &fakeRestic{password: "repo secret"}, jobs: &fakeJobs{busy: map[string]bool{}}, reposDir: t.TempDir(),
 	}
 	code := testSetupCode
 	if initialized {
@@ -200,6 +222,8 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 		Users:         &htpasswd.File{Path: filepath.Join(e.reposDir, ".htpasswd")},
 		Scanner:       e.scanner,
 		Restic:        e.restic,
+		Jobs:          e.jobs,
+		JobList:       db,
 		ReposDir:      e.reposDir,
 		Location:      time.UTC,
 		SetupCode:     code,

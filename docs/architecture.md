@@ -246,8 +246,10 @@ Per repository the UI shows:
   to the largest repository and its share of the total,
 - number and age of lock files (file names and modification times, read live;
   works while sealed; flagged when older than 24 hours),
-- snapshot count, newest snapshot, lock details (needs the password: lock files
-  are encrypted),
+- snapshot count and age of the newest snapshot, cached from the last
+  `snapshots` job (needs the password; queued automatically after a password
+  is stored, and by "Refresh snapshots" for one or all repositories),
+- lock details (needs the password: lock files are encrypted),
 - maintenance plan, last runs and their results.
 
 Below that, a per-user summary (the user is the first path component, as with
@@ -325,14 +327,20 @@ not run. Every step can also be started by hand.
 
 - At most one job per repository at a time; at most `BELAYPOINT_MAX_JOBS` jobs
   in total.
-- Jobs are refused while sealed. A scheduled run that falls into a sealed
-  period is recorded as `skipped (sealed)`; a notification is sent once per
-  sealed period, listing the skipped runs.
+- Jobs need an unsealed vault and a stored password for the repository. The
+  password is fetched from the vault only when a job starts, so a job that
+  waited in the queue while the vault was sealed ends as `refused`. At most
+  256 jobs wait in the queue.
+- A scheduled run that falls into a sealed period is recorded as
+  `skipped (sealed)`; a notification is sent once per sealed period, listing
+  the skipped runs.
 - Sealing during a running job: the job finishes (restic already has the
   password), the secrets are not available for the next job.
 - Output is streamed to `/config/jobs/<id>.log` and to the UI (live log).
-- After a restart, jobs still marked as running are set to `interrupted`;
-  their lock is left to the stale-lock cleanup.
+- States: `queued`, `running`, `succeeded`, `failed`, `refused`,
+  `interrupted`. The "Jobs" page lists them, newest first.
+- After a restart, jobs still marked as queued or running are set to
+  `interrupted`; their lock is left to the stale-lock cleanup.
 
 ## Notifications
 

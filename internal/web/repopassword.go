@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/MB512/belaypoint/internal/jobs"
 	"github.com/MB512/belaypoint/internal/repos"
 	"github.com/MB512/belaypoint/internal/restic"
 	"github.com/MB512/belaypoint/internal/store"
@@ -114,6 +115,11 @@ func (s *server) setRepoPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Audit.Audit(r.Context(), "repository password set", path+", "+remote(r))
+	if s.Jobs != nil {
+		if _, err := s.Jobs.Submit(r.Context(), path, jobs.Snapshots, jobs.Manual); err != nil {
+			s.Logger.Info("snapshots after storing the password not queued", "repo", path, "err", err)
+		}
+	}
 	redirect(w, r, "/")
 }
 

@@ -96,7 +96,7 @@ func TestRepoPasswordWithoutRestic(t *testing.T) {
 	e := newEnv(t, nil, true)
 	makeRepo(t, e.reposDir, "alice/main")
 	_ = e.store.SyncRepos(context.Background(), []string{"alice/main"})
-	e.h = New(func() Options { o := e.opts; o.Restic = nil; return o }())
+	e.h = New(func() Options { o := e.opts; o.Restic, o.Jobs = nil, nil; return o }())
 	cookie := login(t, e)
 	if w := getWithCookie(e.h, "/repos/password?repo=alice/main", cookie); !strings.Contains(w.Body.String(), "not available") {
 		t.Error("missing restic not shown")
