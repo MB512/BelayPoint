@@ -318,13 +318,35 @@ with `--no-lock`.
 Each repository has a page (path link in the overview) with its retention
 policy: keep last / hourly / daily / weekly / monthly / yearly and keep
 within (a restic duration such as `14d` or `1y6m`), grouped by host and
-paths. Without an own policy the default applies: daily 7, weekly 4,
-monthly 12, yearly 3. A policy without any rule is refused (restic would keep
-everything). Values are validated and passed as separate arguments.
+paths. A policy without any rule is refused (restic would keep everything).
+Values are validated and passed as separate arguments.
 
-"Preview" runs `forget --dry-run --no-lock` with the values in the form,
-without saving them, and lists per group which snapshots would be kept and
-removed. It runs right away, outside the job queue: it is read-only and takes
+**Tag rules** give snapshots with a tag their own retention (up to 5 rules,
+each with keep last / daily / weekly / monthly / within). forget then runs in
+passes: first one per rule (`forget --tag <tag>` with the rule's values),
+then the main policy over the snapshots *without* a rule tag only. restic
+has no "without tag" filter, and `--keep-tag` is no help: protected
+snapshots still take keep slots of the main policy (a pre-stop snapshot
+would push a final snapshot out of keep-last). So BelayPoint lists the
+snapshots first (`--no-lock`) and passes the main policy the tag
+combinations found that contain no rule tag (`--tag final --tag ''`, where
+`''` selects untagged snapshots). A snapshot that has a rule tag *and* all
+tags of such a combination (e.g. `final,pre-stop`) would be selected twice;
+forget then refuses with an error instead of guessing. Snapshots created
+between the listing and the main pass with a new tag combination are left
+alone.
+
+The default policy, for repositories without their own: daily 7, weekly 4,
+monthly 12, yearly 3, and the tag rule `pre-stop`: keep last 2. StackBelay
+takes a `pre-stop` snapshot while a stack still runs (not consistent), then
+the consistent `final` snapshot; the rule keeps the two newest pre-stop
+snapshots per host and paths. In repositories without such snapshots the
+rule removes nothing.
+
+"Preview" runs every pass with `forget --dry-run --no-lock` with the values
+in the form, without saving them, and lists per pass and group which
+snapshots would be kept and removed. The passes see disjoint sets of
+snapshots, so the dry runs add up to what forget would do. It runs right away, outside the job queue: it is read-only and takes
 no lock, so it cannot conflict with jobs or client backups.
 
 ### Running maintenance by hand

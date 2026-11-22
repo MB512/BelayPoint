@@ -50,7 +50,7 @@ func TestRepoPageAndPolicy(t *testing.T) {
 	}
 
 	wantRedirect(t, post(e.h, "/repos/policy", cookie, form(map[string]string{"keep_last": "3", "keep_within": "30d"}), nil), "/repos/view?repo=alice%2Fmain")
-	if p, custom, _ := e.store.RepoPolicy(ctx, "alice/main"); !custom || p != (restic.Policy{KeepLast: 3, KeepWithin: "30d"}) {
+	if p, custom, _ := e.store.RepoPolicy(ctx, "alice/main"); !custom || p.String() != (restic.Policy{Keep: restic.Keep{KeepLast: 3, KeepWithin: "30d"}}).String() {
 		t.Errorf("stored %+v", p)
 	}
 	if !e.audit.has("policy changed") {
@@ -81,7 +81,7 @@ func TestForgetPreview(t *testing.T) {
 			t.Errorf("preview lacks %q", want)
 		}
 	}
-	if len(e.jobs.previews) != 1 || e.jobs.previews[0] != "alice/main --group-by host,paths --keep-last 1" {
+	if len(e.jobs.previews) != 1 || e.jobs.previews[0] != "alice/main --keep-last 1" {
 		t.Errorf("previews %v", e.jobs.previews)
 	}
 	// The preview does not save the policy.
@@ -132,5 +132,61 @@ func TestMaintenance(t *testing.T) {
 	want := []string{"forget alice/main", "prune alice/main", "check alice/main"}
 	if strings.Join(e.jobs.submitted, ",") != strings.Join(want, ",") {
 		t.Errorf("submitted %v", e.jobs.submitted)
+	}
+}
+
+func TestTagRules(t *testing.T) {
+	e := newEnv(t, nil, true)
+	ctx := context.Background()
+	makeRepo(t, e.reposDir, "alice/main")
+	_ = e.store.SyncRepos(ctx, []string{"alice/main"})
+	cookie := login(t, e)
+	csrf := csrfFromPage(t, e.h, cookie)
+
+	// The default policy shows its pre-stop rule plus an empty row.
+	body := getWithCookie(e.h, "/repos/view?repo=alice/main", cookie).Body.String()
+	for _, want := range []string{`name="tag_1" value="pre-stop"`, `name="tag_1_last" min="0" value="2"`, `name="tag_2" value=""`, "tag pre-stop: --keep-last 2"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page lacks %s", want)
+		}
+	}
+
+	v := url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "keep_daily": {"7"},
+		"tag_1": {"pre-stop"}, "tag_1_last": {"1"}, "tag_1_within": {"3d"},
+		"tag_2": {"pre-restore"}, "tag_2_weekly": {"2"},
+		"tag_3": {""}, "tag_3_last": {"5"}} // no tag: ignored
+	w := post(e.h, "/repos/forget-preview", cookie, v, nil)
+	body = w.Body.String()
+	if w.Code != http.StatusOK {
+		t.Fatalf("preview: %d", w.Code)
+	}
+	for _, want := range []string{"Tag rule <code>pre-stop</code>: 1 removed", "Tag rule <code>pre-restore</code>: 1 removed",
+		"Policy (snapshots without a rule tag): 2 removed, 1 kept", "4 of 5 snapshots would be removed"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("preview lacks %q", want)
+		}
+	}
+	if e.jobs.previews[0] != "alice/main --keep-daily 7; tag pre-stop: --keep-last 1 --keep-within 3d; tag pre-restore: --keep-weekly 2" {
+		t.Errorf("previewed %q", e.jobs.previews[0])
+	}
+
+	wantRedirect(t, post(e.h, "/repos/policy", cookie, v, nil), "/repos/view?repo=alice%2Fmain")
+	p, _, _ := e.store.RepoPolicy(ctx, "alice/main")
+	if len(p.TagRules) != 2 || p.TagRules[0].Tag != "pre-stop" || p.TagRules[0].KeepWithin != "3d" || p.TagRules[1].KeepWeekly != 2 {
+		t.Errorf("stored %+v", p)
+	}
+
+	for name, bad := range map[string]url.Values{
+		"rule without keep": {"tag_1": {"pre-stop"}},
+		"tag list":          {"tag_1": {"a,b"}, "tag_1_last": {"1"}},
+		"twice":             {"tag_1": {"x"}, "tag_1_last": {"1"}, "tag_2": {"x"}, "tag_2_last": {"1"}},
+		"bad number":        {"tag_1": {"x"}, "tag_1_last": {"one"}},
+	} {
+		bad.Set("csrf_token", csrf)
+		bad.Set("repo", "alice/main")
+		bad.Set("keep_daily", "7")
+		if w := post(e.h, "/repos/policy", cookie, bad, nil); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d", name, w.Code)
+		}
 	}
 }

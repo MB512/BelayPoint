@@ -23,7 +23,7 @@ import (
 type Jobs interface {
 	Submit(ctx context.Context, repo string, typ jobs.Type, trigger jobs.Trigger) (int64, error)
 	Busy(repo string) bool
-	PreviewForget(ctx context.Context, repo string, p restic.Policy) ([]restic.ForgetGroup, error)
+	PreviewForget(ctx context.Context, repo string, p restic.Policy) ([]restic.PassResult, error)
 }
 
 // JobList reads the job history (implemented by *store.Store).

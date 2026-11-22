@@ -59,20 +59,40 @@ A snapshot is kept if any rule matches. Empty fields are not used.</p>
 <label>Yearly<input type="number" name="keep_yearly" min="0" value="{{if .Policy.KeepYearly}}{{.Policy.KeepYearly}}{{end}}"></label>
 <label>Within <small>e.g. 14d, 6m, 1y6m</small><input type="text" name="keep_within" value="{{.Policy.KeepWithin}}" pattern="([0-9]+[ymdh])+"></label>
 </div>
+<h3>Tag rules</h3>
+<p class="muted">Snapshots with one of these tags get their own retention, applied first; the policy above then only
+sees the snapshots without such a tag. Example: StackBelay's <code>pre-stop</code> snapshots are taken while a stack
+still runs (not consistent); the <code>final</code> snapshot follows. Clear the tag to remove a rule.</p>
+<table class="tagrules">
+<thead><tr><th>Tag</th><th>Last</th><th>Daily</th><th>Weekly</th><th>Monthly</th><th>Within</th></tr></thead>
+<tbody>
+{{range .TagRows}}<tr>
+<td><input type="text" name="tag_{{.Index}}" value="{{.Tag}}" placeholder="{{if eq .Index 1}}pre-stop{{end}}" spellcheck="false" autocomplete="off" pattern="[A-Za-z0-9_][A-Za-z0-9._:@+\-]{0,63}"></td>
+<td><input type="number" name="tag_{{.Index}}_last" min="0" value="{{.Last}}"></td>
+<td><input type="number" name="tag_{{.Index}}_daily" min="0" value="{{.Daily}}"></td>
+<td><input type="number" name="tag_{{.Index}}_weekly" min="0" value="{{.Weekly}}"></td>
+<td><input type="number" name="tag_{{.Index}}_monthly" min="0" value="{{.Monthly}}"></td>
+<td><input type="text" name="tag_{{.Index}}_within" value="{{.Within}}" pattern="([0-9]+[ymdh])+" spellcheck="false" autocomplete="off"></td>
+</tr>
+{{end}}
+</tbody>
+</table>
 <div class="buttons">
 {{if $.JobsAvailable}}<button type="submit" formaction="/repos/forget-preview" title="forget --dry-run: shows what would be removed, changes nothing">Preview</button>{{end}}
 <button type="submit" formaction="/repos/policy">Save policy</button>
 {{if .Custom}}<button type="submit" formaction="/repos/policy" name="reset" value="yes" class="link" formnovalidate>Reset to default</button>{{end}}
 </div>
 </form>
-<p class="muted">Default: daily {{.Default.KeepDaily}}, weekly {{.Default.KeepWeekly}}, monthly {{.Default.KeepMonthly}}, yearly {{.Default.KeepYearly}}.</p>
+<p class="muted">Default: <code>{{.Default}}</code>.</p>
 
 {{with .Preview}}
 <h2>Preview</h2>
 <p>With this policy, <strong>{{.Remove}} of {{add .Keep .Remove}} snapshots would be removed</strong> and {{.Keep}} kept.
 Nothing has been changed. The space is only freed by a later prune.</p>
+{{range .Passes}}
+<h3>{{if .Tag}}Tag rule <code>{{.Tag}}</code>{{else}}Policy{{if $.Repo.Policy.TagRules}} (snapshots without a rule tag){{end}}{{end}}: {{.Remove}} removed, {{.Keep}} kept</h3>
 {{range .Groups}}
-<h3><code>{{.Host}}</code> {{.Paths}}</h3>
+<h4><code>{{.Host}}</code> {{.Paths}}</h4>
 <p>{{len .Keep}} kept, {{len .Remove}} removed.</p>
 {{if .Remove}}<details open><summary>Removed</summary>
 <table><thead><tr><th>Snapshot</th><th>Time</th><th>Tags</th></tr></thead><tbody>
@@ -82,6 +102,8 @@ Nothing has been changed. The space is only freed by a later prune.</p>
 <table><thead><tr><th>Snapshot</th><th>Time</th><th>Tags</th></tr></thead><tbody>
 {{range .Keep}}<tr><td><code>{{.ID}}</code></td><td class="nowrap">{{.Time}}</td><td>{{.Tags}}</td></tr>{{end}}
 </tbody></table></details>
+{{else}}<p class="muted">No snapshots.</p>
+{{end}}
 {{end}}
 {{end}}
 {{end}}

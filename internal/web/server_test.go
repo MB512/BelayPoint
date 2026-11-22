@@ -171,19 +171,25 @@ func (f *fakeJobs) Submit(_ context.Context, repo string, typ jobs.Type, _ jobs.
 	return int64(len(f.submitted)), nil
 }
 
-func (f *fakeJobs) PreviewForget(_ context.Context, repo string, p restic.Policy) ([]restic.ForgetGroup, error) {
+func (f *fakeJobs) PreviewForget(_ context.Context, repo string, p restic.Policy) ([]restic.PassResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
 	}
-	f.previews = append(f.previews, repo+" "+strings.Join(p.Args(), " "))
+	f.previews = append(f.previews, repo+" "+p.String())
 	t0 := time.Date(2026, 11, 1, 3, 0, 0, 0, time.UTC)
-	return []restic.ForgetGroup{{
+	var res []restic.PassResult
+	for _, r := range p.TagRules {
+		res = append(res, restic.PassResult{Tag: r.Tag, Groups: []restic.ForgetGroup{{
+			Host: "pc", Remove: []restic.Snapshot{{ShortID: "prestop1", Time: t0, Tags: []string{r.Tag}}},
+		}}})
+	}
+	return append(res, restic.PassResult{Groups: []restic.ForgetGroup{{
 		Host: "pc<1>", Paths: []string{"/home"},
 		Keep:   []restic.Snapshot{{ShortID: "keep0001", Time: t0}},
 		Remove: []restic.Snapshot{{ShortID: "gone0001", Time: t0}, {ShortID: "gone0002", Time: t0, Tags: []string{"daily"}}},
-	}}, nil
+	}}}), nil
 }
 
 // fakeSchedule counts reloads.
