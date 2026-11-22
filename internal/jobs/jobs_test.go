@@ -77,6 +77,31 @@ func (f *fakeRunner) ForgetPreview(_ context.Context, dir string, pw []byte, p r
 	return []restic.ForgetGroup{{Host: dir, Keep: make([]restic.Snapshot, p.KeepLast), Remove: make([]restic.Snapshot, 1)}}, nil
 }
 
+func (f *fakeRunner) Forget(_ context.Context, _ string, pw []byte, p restic.Policy, log io.Writer) ([]restic.ForgetGroup, error) {
+	f.mu.Lock()
+	f.seenPW = append(f.seenPW, string(pw))
+	err := f.err
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(log, "forget %s\n", strings.Join(p.Args(), " "))
+	return []restic.ForgetGroup{
+		{Keep: make([]restic.Snapshot, 1), Remove: make([]restic.Snapshot, 2)},
+		{Keep: make([]restic.Snapshot, 1), Remove: make([]restic.Snapshot, 1)},
+	}, nil
+}
+
+func (f *fakeRunner) Prune(_ context.Context, _ string, _ []byte, maxUnused string, log io.Writer) error {
+	fmt.Fprintf(log, "prune --max-unused %s\n", maxUnused)
+	return f.err
+}
+
+func (f *fakeRunner) Check(_ context.Context, _ string, _ []byte, subset string, log io.Writer) error {
+	fmt.Fprintf(log, "check subset=%q\n", subset)
+	return f.err
+}
+
 // Unlock echoes the password into the log, to check redaction.
 func (f *fakeRunner) Unlock(_ context.Context, _ string, pw []byte, removeAll bool, log io.Writer) (int, error) {
 	f.mu.Lock()
@@ -159,6 +184,13 @@ func (s *fakeStore) SetRepoSnapshots(_ context.Context, path string, count int, 
 	defer s.mu.Unlock()
 	s.snapshots[path], s.newest[path] = count, newest
 	return nil
+}
+
+func (s *fakeStore) RepoPolicy(_ context.Context, path string) (restic.Policy, bool, error) {
+	if path == "bob/main" {
+		return restic.Policy{KeepLast: 9}, true, nil
+	}
+	return restic.DefaultPolicy, false, nil
 }
 
 func (s *fakeStore) job(id int64) jobRow {
@@ -415,5 +447,57 @@ func TestPreviewForget(t *testing.T) {
 		if strings.Trim(string(c), "\x00") != "" {
 			t.Errorf("password copy not zeroed: %q", c)
 		}
+	}
+}
+
+func TestMaintenanceJobs(t *testing.T) {
+	e := newEnv(t, false, 1)
+	for _, c := range []struct {
+		repo    string
+		typ     Type
+		summary string
+		log     string
+	}{
+		{"bob/main", Forget, "3 snapshots removed, 2 kept", "forget --group-by host,paths --keep-last 9"},
+		{"alice/main", Forget, "3 snapshots removed, 2 kept", "--keep-daily 7 --keep-weekly 4"},
+		{"alice/main", Prune, "pruned", "prune --max-unused 5%"},
+		{"alice/main", Check, "no errors found", "check subset"},
+	} {
+		id, err := e.m.Submit(context.Background(), c.repo, c.typ, Manual)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.waitDone(t)
+		waitIdle(t, e.m, c.repo)
+		if j := e.store.job(id); j.state != StateSucceeded || j.summary != c.summary {
+			t.Errorf("%s %s: %+v", c.typ, c.repo, j)
+		}
+		if c.typ == Forget && e.store.snapshots[c.repo] != 2 {
+			t.Errorf("forget did not update the snapshot summary: %v", e.store.snapshots)
+		}
+		data, _ := os.ReadFile(LogPath(e.m.logDir, id))
+		if !strings.Contains(string(data), c.log) {
+			t.Errorf("%s log lacks %q:\n%s", c.typ, c.log, data)
+		}
+	}
+}
+
+// A forget that cannot get its lock (restic waited --retry-lock and gave
+// up) fails; the repository is free for the next attempt.
+func TestForgetLockConflict(t *testing.T) {
+	e := newEnv(t, false, 1)
+	e.runner.err = fmt.Errorf("restic forget failed (exit code 11): %w", restic.ErrLocked)
+	id, _ := e.m.Submit(context.Background(), "alice/main", Forget, Manual)
+	e.waitDone(t)
+	j := e.store.job(id)
+	if j.state != StateFailed || !strings.Contains(j.err, "locked") {
+		t.Errorf("job = %+v", j)
+	}
+	waitIdle(t, e.m, "alice/main")
+	e.runner.err = nil
+	id, _ = e.m.Submit(context.Background(), "alice/main", Forget, Manual)
+	e.waitDone(t)
+	if j := e.store.job(id); j.state != StateSucceeded {
+		t.Errorf("retry: %+v", j)
 	}
 }

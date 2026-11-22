@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,12 +25,15 @@ const (
 	Snapshots Type = "snapshots"  // refresh the cached snapshot summary
 	Unlock    Type = "unlock"     // remove stale locks
 	UnlockAll Type = "unlock-all" // remove all locks, also of running backups
+	Forget    Type = "forget"     // remove snapshots per the repository's policy
+	Prune     Type = "prune"      // remove unreferenced data
+	Check     Type = "check"      // verify the repository structure
 )
 
 // Valid reports whether t is a known job type.
 func (t Type) Valid() bool {
 	switch t {
-	case Snapshots, Unlock, UnlockAll:
+	case Snapshots, Unlock, UnlockAll, Forget, Prune, Check:
 		return true
 	}
 	return false
@@ -81,6 +85,7 @@ type Store interface {
 	StartJob(ctx context.Context, id int64, at time.Time) error
 	FinishJob(ctx context.Context, id int64, state, summary, errText string, at time.Time) error
 	SetRepoSnapshots(ctx context.Context, path string, count int, newest, at time.Time) error
+	RepoPolicy(ctx context.Context, path string) (restic.Policy, bool, error)
 }
 
 // Manager queues and runs jobs. Create it with New, then call Run once.
@@ -299,6 +304,17 @@ func (m *Manager) run(ctx context.Context, t task) {
 	}
 }
 
+// storeSnapshots caches count and newest time of a snapshot list.
+func (m *Manager) storeSnapshots(ctx context.Context, repo string, list []restic.Snapshot) error {
+	var newest time.Time
+	for _, s := range list {
+		if s.Time.After(newest) {
+			newest = s.Time
+		}
+	}
+	return m.store.SetRepoSnapshots(ctx, repo, len(list), newest, m.now())
+}
+
 func (m *Manager) execute(ctx, record context.Context, t task, dir string, pw []byte, jl *jobLog) (string, error) {
 	switch t.typ {
 	case Snapshots:
@@ -306,13 +322,7 @@ func (m *Manager) execute(ctx, record context.Context, t task, dir string, pw []
 		if err != nil {
 			return "", err
 		}
-		var newest time.Time
-		for _, s := range list {
-			if s.Time.After(newest) {
-				newest = s.Time
-			}
-		}
-		if err := m.store.SetRepoSnapshots(record, t.repo, len(list), newest, m.now()); err != nil {
+		if err := m.storeSnapshots(record, t.repo, list); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("%d snapshots", len(list)), nil
@@ -322,6 +332,38 @@ func (m *Manager) execute(ctx, record context.Context, t task, dir string, pw []
 			return "", err
 		}
 		return fmt.Sprintf("%d locks removed", n), nil
+	case Forget:
+		p, _, err := m.store.RepoPolicy(record, t.repo)
+		if err != nil {
+			return "", err
+		}
+		jl.Printf(m.now(), "policy: %s", strings.Join(p.Args(), " "))
+		groups, err := m.runner.Forget(ctx, dir, pw, p, jl)
+		if err != nil {
+			return "", err
+		}
+		// The kept snapshots are all that is left: update the cached
+		// summary without another listing.
+		var kept []restic.Snapshot
+		removed := 0
+		for _, g := range groups {
+			kept = append(kept, g.Keep...)
+			removed += len(g.Remove)
+		}
+		if err := m.storeSnapshots(record, t.repo, kept); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d snapshots removed, %d kept", removed, len(kept)), nil
+	case Prune:
+		if err := m.runner.Prune(ctx, dir, pw, restic.DefaultMaxUnused, jl); err != nil {
+			return "", err
+		}
+		return "pruned", nil
+	case Check:
+		if err := m.runner.Check(ctx, dir, pw, "", jl); err != nil {
+			return "", err
+		}
+		return "no errors found", nil
 	}
 	return "", fmt.Errorf("%w: %q", ErrUnknown, t.typ)
 }
