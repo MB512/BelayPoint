@@ -21,8 +21,19 @@ type Type string
 
 // Job types.
 const (
-	Snapshots Type = "snapshots" // refresh the cached snapshot summary
+	Snapshots Type = "snapshots"  // refresh the cached snapshot summary
+	Unlock    Type = "unlock"     // remove stale locks
+	UnlockAll Type = "unlock-all" // remove all locks, also of running backups
 )
+
+// Valid reports whether t is a known job type.
+func (t Type) Valid() bool {
+	switch t {
+	case Snapshots, Unlock, UnlockAll:
+		return true
+	}
+	return false
+}
 
 // Trigger says who started a job.
 type Trigger string
@@ -81,6 +92,7 @@ type Manager struct {
 	logger  *slog.Logger
 	now     func() time.Time
 	workers int
+	logDir  string
 
 	queue chan task
 	wg    sync.WaitGroup
@@ -107,13 +119,15 @@ type Options struct {
 	Now     func() time.Time
 	// MaxJobs is the number of jobs that run at the same time.
 	MaxJobs int
+	// LogDir receives one log file per job (<id>.log).
+	LogDir string
 }
 
 // New returns a Manager; jobs run only after Run was called.
 func New(o Options) *Manager {
 	return &Manager{
 		root: o.Root, runner: o.Runner, secrets: o.Secrets, store: o.Store, logger: o.Logger,
-		now: o.Now, workers: max(o.MaxJobs, 1),
+		now: o.Now, workers: max(o.MaxJobs, 1), logDir: o.LogDir,
 		queue: make(chan task, queueSize),
 		busy:  map[string]int64{},
 	}
@@ -164,7 +178,7 @@ func (m *Manager) Busy(repo string) bool {
 // present repository. Jobs are refused while sealed and for repositories
 // without a stored password.
 func (m *Manager) Submit(ctx context.Context, repo string, typ Type, trigger Trigger) (int64, error) {
-	if typ != Snapshots {
+	if !typ.Valid() {
 		return 0, fmt.Errorf("%w: %q", ErrUnknown, typ)
 	}
 	if m.secrets.Sealed() {
@@ -231,23 +245,39 @@ func (m *Manager) run(ctx context.Context, t task) {
 		finish(StateFailed, "", err)
 		return
 	}
+	jl, err := createLog(m.logDir, t.id, pw)
+	if err != nil {
+		finish(StateFailed, "", err)
+		return
+	}
+	// Deferred calls run last-in, first-out (like nested using blocks in
+	// C#): the log is closed before the password is zeroed.
+	defer func() {
+		if err := jl.Close(); err != nil {
+			log.Warn("closing job log", "err", err)
+		}
+	}()
 	if err := m.store.StartJob(record, t.id, m.now()); err != nil {
 		log.Error("recording job start", "err", err)
 	}
 	log.Info("job started")
+	jl.Printf(m.now(), "job %d: %s %s (%s)", t.id, t.typ, t.repo, "started")
 
-	summary, err := m.execute(ctx, record, t, dir, pw)
+	summary, err := m.execute(ctx, record, t, dir, pw, jl)
 	switch {
 	case err == nil:
+		jl.Printf(m.now(), "succeeded: %s", summary)
 		finish(StateSucceeded, summary, nil)
 	case ctx.Err() != nil:
+		jl.Printf(m.now(), "interrupted: %v", err)
 		finish(StateInterrupted, "", err)
 	default:
+		jl.Printf(m.now(), "failed: %v", err)
 		finish(StateFailed, "", err)
 	}
 }
 
-func (m *Manager) execute(ctx, record context.Context, t task, dir string, pw []byte) (string, error) {
+func (m *Manager) execute(ctx, record context.Context, t task, dir string, pw []byte, jl *jobLog) (string, error) {
 	switch t.typ {
 	case Snapshots:
 		list, err := m.runner.Snapshots(ctx, dir, pw)
@@ -264,6 +294,12 @@ func (m *Manager) execute(ctx, record context.Context, t task, dir string, pw []
 			return "", err
 		}
 		return fmt.Sprintf("%d snapshots", len(list)), nil
+	case Unlock, UnlockAll:
+		n, err := m.runner.Unlock(ctx, dir, pw, t.typ == UnlockAll, jl)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d locks removed", n), nil
 	}
 	return "", fmt.Errorf("%w: %q", ErrUnknown, t.typ)
 }

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -68,6 +69,18 @@ func newRunner(block bool) *fakeRunner {
 }
 
 func (f *fakeRunner) CatConfig(context.Context, string, []byte) error { return nil }
+
+// Unlock echoes the password into the log, to check redaction.
+func (f *fakeRunner) Unlock(_ context.Context, _ string, pw []byte, removeAll bool, log io.Writer) (int, error) {
+	f.mu.Lock()
+	f.seenPW = append(f.seenPW, string(pw))
+	f.mu.Unlock()
+	fmt.Fprintf(log, "restic says: password was %s\nsuccessfully removed 2 locks\n", pw)
+	if removeAll {
+		return 5, nil
+	}
+	return 2, nil
+}
 
 func (f *fakeRunner) Snapshots(ctx context.Context, dir string, pw []byte) ([]restic.Snapshot, error) {
 	f.mu.Lock()
@@ -175,6 +188,7 @@ func newEnv(t *testing.T, block bool, maxJobs int) *env {
 	e.m = New(Options{
 		Root: root, Runner: e.runner, Secrets: e.secrets, Store: e.store,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now, MaxJobs: maxJobs,
+		LogDir: t.TempDir(),
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	e.cancel = cancel
@@ -350,4 +364,28 @@ func TestShutdownInterrupts(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Error("Submit after shutdown not refused")
+}
+
+func TestUnlockJobLog(t *testing.T) {
+	e := newEnv(t, false, 1)
+	for typ, want := range map[Type]string{Unlock: "2 locks removed", UnlockAll: "5 locks removed"} {
+		id, err := e.m.Submit(context.Background(), "alice/main", typ, Manual)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.waitDone(t)
+		waitIdle(t, e.m, "alice/main")
+		if j := e.store.job(id); j.state != StateSucceeded || j.summary != want {
+			t.Errorf("%s: %+v", typ, j)
+		}
+		data, err := os.ReadFile(LogPath(e.m.logDir, id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		log := string(data)
+		if bytes.Contains(data, []byte("pw-alice")) || !strings.Contains(log, "password was [redacted]") ||
+			!strings.Contains(log, "succeeded: "+want) || !strings.Contains(log, string(typ)+" alice/main") {
+			t.Errorf("%s log:\n%s", typ, log)
+		}
+	}
 }
