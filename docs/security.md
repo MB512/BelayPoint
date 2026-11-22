@@ -53,6 +53,14 @@ therefore the unsealed secrets; nothing in a container prevents that.
    filtered for the secret values. Limit: Go's AES implementation keeps its
    own expanded copy of the key, which cannot be zeroed; BelayPoint creates
    the cipher per operation, so that copy is short-lived garbage.
+
+   In the browser, only the admin login and setup use `type="password"`.
+   Repository and rest-server user passwords are entered in text fields
+   masked by CSS (`-webkit-text-security`) and marked for the common
+   password managers to ignore (`data-bwignore`, `data-1p-ignore`,
+   `data-lpignore`, ...), with spell checking off. Otherwise password
+   managers take them for a new login password and offer to overwrite the
+   stored admin password, which cannot be recovered if lost.
 5. **Sealed by default.** After every start nothing runs until the admin logs
    in. "Seal now" wipes the secrets immediately. Sessions live in memory only.
 6. **Authentication.** One admin. Login = deriving the vault key and opening

@@ -102,3 +102,26 @@ func TestRepoPasswordWithoutRestic(t *testing.T) {
 		t.Error("missing restic not shown")
 	}
 }
+
+// Repository and rest-server user passwords must not look like a login to
+// password managers, or they offer to overwrite the stored admin password.
+func TestSecretFieldsNotForPasswordManagers(t *testing.T) {
+	e := newEnv(t, nil, true)
+	makeRepo(t, e.reposDir, "alice/main")
+	_ = e.store.SyncRepos(context.Background(), []string{"alice/main"})
+	cookie := login(t, e)
+	for _, path := range []string{"/repos/password?repo=alice/main", "/users"} {
+		body := getWithCookie(e.h, path, cookie).Body.String()
+		if strings.Contains(body, `type="password"`) {
+			t.Errorf("%s has a password-type field", path)
+		}
+		for _, want := range []string{`class="masked"`, `data-bwignore="true"`, `data-1p-ignore="true"`, `data-lpignore="true"`, `spellcheck="false"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s lacks %s", path, want)
+			}
+		}
+	}
+	if body := get(e.h, "/login", nil).Body.String(); !strings.Contains(body, `type="password"`) {
+		t.Error("the login must stay a real password field")
+	}
+}

@@ -89,3 +89,9 @@ details summary { cursor: pointer; }
 a.button { display: inline-block; padding: .5rem 1rem; border-radius: 6px; color: #fff; background: var(--accent); text-decoration: none; }
 a.button.danger { background: var(--danger); }
 label.check { display: flex; align-items: center; gap: .5rem; font-weight: 400; }
+/* Secrets that are not the admin login (repository and rest-server user
+   passwords) use a text field masked by CSS: password managers offer to
+   save only type="password" fields, and would otherwise propose to replace
+   the stored admin password. -webkit-text-security works in Chromium,
+   Safari and current Firefox. */
+input.masked { -webkit-text-security: disc; font-family: monospace; }

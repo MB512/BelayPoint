@@ -28,11 +28,11 @@ within about 30 seconds.</p>
 <form method="post" action="/users/add" class="stack">
 <input type="hidden" name="csrf_token" value="{{.CSRF}}">
 <label>User name
-<input name="name" required pattern="[a-z0-9][a-z0-9._\-]{0,63}" maxlength="64" autocomplete="off" spellcheck="false">
+<input name="name" required pattern="[a-z0-9][a-z0-9._\-]{0,63}" maxlength="64" autocomplete="off" spellcheck="false" data-bwignore="true" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
 <small>Lowercase letters, digits, <code>.</code>, <code>_</code>, <code>-</code>. Usually the name of the backed-up host.</small>
 </label>
 <label>Password
-<input type="password" name="password" minlength="12" maxlength="72" autocomplete="new-password">
+<input type="text" class="masked" name="password" minlength="12" maxlength="72" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" data-bwignore="true" data-1p-ignore="true" data-lpignore="true" data-form-type="other" data-protonpass-ignore="true">
 <small>Leave empty to generate a strong password (recommended); it is shown once.</small>
 </label>
 <button type="submit">Add user</button>
