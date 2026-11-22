@@ -1,0 +1,353 @@
+package jobs
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/MB512/belaypoint/internal/restic"
+	"github.com/MB512/belaypoint/internal/vault"
+)
+
+// fakeSecrets is a vault with plain values.
+type fakeSecrets struct {
+	mu     sync.Mutex
+	sealed bool
+	values map[string][]byte
+	given  [][]byte // copies handed out, to check they get zeroed
+}
+
+func (f *fakeSecrets) Sealed() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.sealed }
+func (f *fakeSecrets) seal()        { f.mu.Lock(); defer f.mu.Unlock(); f.sealed = true }
+
+func (f *fakeSecrets) Has(name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.values[name]
+	return ok
+}
+
+func (f *fakeSecrets) Secret(name string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sealed {
+		return nil, vault.ErrSealed
+	}
+	v, ok := f.values[name]
+	if !ok {
+		return nil, vault.ErrNotFound
+	}
+	c := bytes.Clone(v)
+	f.given = append(f.given, c)
+	return c, nil
+}
+
+// fakeRunner lists snapshots; with block set it waits for release (or
+// ctx) first.
+type fakeRunner struct {
+	mu      sync.Mutex
+	block   bool
+	started chan string   // repo of each started call
+	release chan struct{} // closed to let blocked calls finish
+	err     error
+	active  int
+	peak    int
+	seenPW  []string
+}
+
+func newRunner(block bool) *fakeRunner {
+	return &fakeRunner{block: block, started: make(chan string, 16), release: make(chan struct{})}
+}
+
+func (f *fakeRunner) CatConfig(context.Context, string, []byte) error { return nil }
+
+func (f *fakeRunner) Snapshots(ctx context.Context, dir string, pw []byte) ([]restic.Snapshot, error) {
+	f.mu.Lock()
+	f.active++
+	f.peak = max(f.peak, f.active)
+	f.seenPW = append(f.seenPW, string(pw))
+	block, err := f.block, f.err
+	f.mu.Unlock()
+	defer func() { f.mu.Lock(); f.active--; f.mu.Unlock() }()
+	f.started <- filepath.Base(filepath.Dir(dir)) + "/" + filepath.Base(dir)
+	if block {
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	t0 := time.Date(2026, 11, 1, 3, 0, 0, 0, time.UTC)
+	return []restic.Snapshot{{ShortID: "a", Time: t0}, {ShortID: "b", Time: t0.Add(24 * time.Hour)}}, nil
+}
+
+// fakeStore records jobs in memory.
+type fakeStore struct {
+	mu        sync.Mutex
+	jobs      map[int64]*jobRow
+	next      int64
+	snapshots map[string]int
+	newest    map[string]time.Time
+	done      chan int64
+}
+
+type jobRow struct {
+	repo, typ, state, summary, err string
+}
+
+func newStore() *fakeStore {
+	return &fakeStore{jobs: map[int64]*jobRow{}, snapshots: map[string]int{}, newest: map[string]time.Time{}, done: make(chan int64, 16)}
+}
+
+func (s *fakeStore) AddJob(_ context.Context, repo, typ, _ string, _ time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.next++
+	s.jobs[s.next] = &jobRow{repo: repo, typ: typ, state: StateQueued}
+	return s.next, nil
+}
+
+func (s *fakeStore) StartJob(_ context.Context, id int64, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jobs[id].state = StateRunning
+	return nil
+}
+
+func (s *fakeStore) FinishJob(_ context.Context, id int64, state, summary, errText string, _ time.Time) error {
+	s.mu.Lock()
+	j := s.jobs[id]
+	j.state, j.summary, j.err = state, summary, errText
+	s.mu.Unlock()
+	s.done <- id
+	return nil
+}
+
+func (s *fakeStore) SetRepoSnapshots(_ context.Context, path string, count int, newest, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshots[path], s.newest[path] = count, newest
+	return nil
+}
+
+func (s *fakeStore) job(id int64) jobRow {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return *s.jobs[id]
+}
+
+type env struct {
+	m       *Manager
+	secrets *fakeSecrets
+	runner  *fakeRunner
+	store   *fakeStore
+	cancel  context.CancelFunc
+}
+
+func newEnv(t *testing.T, block bool, maxJobs int) *env {
+	t.Helper()
+	root := t.TempDir()
+	for _, r := range []string{"alice/main", "bob/main", "carol/main"} {
+		if err := os.MkdirAll(filepath.Join(root, r), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := &env{
+		secrets: &fakeSecrets{values: map[string][]byte{
+			vault.RepoSecret("alice/main"): []byte("pw-alice"),
+			vault.RepoSecret("bob/main"):   []byte("pw-bob"),
+			vault.RepoSecret("carol/main"): []byte("pw-carol"),
+		}},
+		runner: newRunner(block),
+		store:  newStore(),
+	}
+	e.m = New(Options{
+		Root: root, Runner: e.runner, Secrets: e.secrets, Store: e.store,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now, MaxJobs: maxJobs,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	e.cancel = cancel
+	e.m.Run(ctx)
+	t.Cleanup(func() { cancel(); e.m.Wait() })
+	return e
+}
+
+func (e *env) waitDone(t *testing.T) int64 {
+	t.Helper()
+	select {
+	case id := <-e.store.done:
+		return id
+	case <-time.After(10 * time.Second):
+		t.Fatal("job did not finish")
+		return 0
+	}
+}
+
+func TestSnapshotsJob(t *testing.T) {
+	e := newEnv(t, false, 2)
+	id, err := e.m.Submit(context.Background(), "alice/main", Snapshots, Manual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.waitDone(t); got != id {
+		t.Fatalf("finished %d, want %d", got, id)
+	}
+	j := e.store.job(id)
+	if j.state != StateSucceeded || j.summary != "2 snapshots" {
+		t.Errorf("job = %+v", j)
+	}
+	if e.store.snapshots["alice/main"] != 2 || e.store.newest["alice/main"].Day() != 2 {
+		t.Errorf("snapshots = %v %v", e.store.snapshots, e.store.newest)
+	}
+	if e.runner.seenPW[0] != "pw-alice" {
+		t.Errorf("runner got %q", e.runner.seenPW[0])
+	}
+	waitIdle(t, e.m, "alice/main")
+	for _, c := range e.secrets.given {
+		if string(c) != "\x00\x00\x00\x00\x00\x00\x00\x00" {
+			t.Errorf("password copy not zeroed: %q", c)
+		}
+	}
+}
+
+func waitIdle(t *testing.T, m *Manager, repo string) {
+	t.Helper()
+	for range 1000 {
+		if !m.Busy(repo) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("%s still busy", repo)
+}
+
+func TestRefusedWhileSealed(t *testing.T) {
+	e := newEnv(t, false, 1)
+	e.secrets.seal()
+	if _, err := e.m.Submit(context.Background(), "alice/main", Snapshots, Manual); !errors.Is(err, ErrSealed) {
+		t.Errorf("err = %v", err)
+	}
+	if len(e.store.jobs) != 0 {
+		t.Error("refused job recorded")
+	}
+}
+
+func TestSubmitErrors(t *testing.T) {
+	e := newEnv(t, true, 1)
+	ctx := context.Background()
+	if _, err := e.m.Submit(ctx, "dave/main", Snapshots, Manual); !errors.Is(err, ErrNoPassword) {
+		t.Errorf("no password: %v", err)
+	}
+	if _, err := e.m.Submit(ctx, "alice/main", "format-disk", Manual); !errors.Is(err, ErrUnknown) {
+		t.Errorf("unknown type: %v", err)
+	}
+	if _, err := e.m.Submit(ctx, "alice/main", Snapshots, Manual); err != nil {
+		t.Fatal(err)
+	}
+	if !e.m.Busy("alice/main") {
+		t.Error("not busy")
+	}
+	if _, err := e.m.Submit(ctx, "alice/main", Snapshots, Manual); !errors.Is(err, ErrBusy) {
+		t.Errorf("second job for the same repository: %v", err)
+	}
+	close(e.runner.release)
+	e.waitDone(t)
+}
+
+// Sealing while a job runs: the job finishes with the password it already
+// has; the next job, queued behind it, is refused because the password is
+// fetched only when a job starts.
+func TestSealDuringRunningJob(t *testing.T) {
+	e := newEnv(t, true, 1)
+	ctx := context.Background()
+	first, _ := e.m.Submit(ctx, "alice/main", Snapshots, Manual)
+	<-e.runner.started
+	second, err := e.m.Submit(ctx, "bob/main", Snapshots, Manual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.secrets.seal()
+	close(e.runner.release)
+	e.waitDone(t)
+	e.waitDone(t)
+	if j := e.store.job(first); j.state != StateSucceeded {
+		t.Errorf("running job: %+v", j)
+	}
+	if j := e.store.job(second); j.state != StateRefused || j.err == "" {
+		t.Errorf("queued job: %+v", j)
+	}
+	if len(e.runner.seenPW) != 1 {
+		t.Errorf("runner called %d times", len(e.runner.seenPW))
+	}
+}
+
+// A lock held by someone else (restic gave up after --retry-lock) fails
+// the job with restic's message; the repository is free again afterwards.
+func TestLockConflict(t *testing.T) {
+	e := newEnv(t, false, 1)
+	e.runner.err = fmt.Errorf("restic snapshots failed (exit code 11): %w", restic.ErrLocked)
+	id, _ := e.m.Submit(context.Background(), "alice/main", Snapshots, Manual)
+	e.waitDone(t)
+	if j := e.store.job(id); j.state != StateFailed || j.err == "" {
+		t.Errorf("job = %+v", j)
+	}
+	waitIdle(t, e.m, "alice/main")
+	e.runner.err = nil
+	if _, err := e.m.Submit(context.Background(), "alice/main", Snapshots, Manual); err != nil {
+		t.Errorf("retry: %v", err)
+	}
+	e.waitDone(t)
+}
+
+func TestMaxJobs(t *testing.T) {
+	e := newEnv(t, true, 2)
+	ctx := context.Background()
+	for _, r := range []string{"alice/main", "bob/main", "carol/main"} {
+		if _, err := e.m.Submit(ctx, r, Snapshots, Manual); err != nil {
+			t.Fatal(err)
+		}
+	}
+	<-e.runner.started
+	<-e.runner.started
+	select {
+	case r := <-e.runner.started:
+		t.Fatalf("third job %s started while two run", r)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(e.runner.release)
+	for range 3 {
+		e.waitDone(t)
+	}
+	if e.runner.peak != 2 {
+		t.Errorf("peak = %d", e.runner.peak)
+	}
+}
+
+func TestShutdownInterrupts(t *testing.T) {
+	e := newEnv(t, true, 1)
+	id, _ := e.m.Submit(context.Background(), "alice/main", Snapshots, Manual)
+	<-e.runner.started
+	e.cancel()
+	e.m.Wait()
+	if j := e.store.job(id); j.state != StateInterrupted {
+		t.Errorf("job = %+v", j)
+	}
+	for range 100 {
+		if _, err := e.m.Submit(context.Background(), "bob/main", Snapshots, Manual); errors.Is(err, ErrStopped) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Error("Submit after shutdown not refused")
+}
