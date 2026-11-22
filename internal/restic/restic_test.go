@@ -327,7 +327,7 @@ func TestRealUnlock(t *testing.T) {
 	if err := <-started; err == nil {
 		t.Log("backup finished before it was killed")
 	}
-	entries, _ := os.ReadDir(locks)
+	entries := stableDir(t, locks)
 	if len(entries) == 0 {
 		t.Skip("restic removed its lock in time; nothing stale to test")
 	}
@@ -339,7 +339,7 @@ func TestRealUnlock(t *testing.T) {
 	// Whether restic considers the lock stale depends on its version
 	// (older ones wait 30 minutes); what matters here is that the count
 	// matches what was removed.
-	after, _ := os.ReadDir(locks)
+	after := stableDir(t, locks)
 	if n != len(entries)-len(after) {
 		t.Errorf("reported %d removed, but %d of %d are gone; log %q", n, len(entries)-len(after), len(entries), log.String())
 	}
@@ -499,4 +499,28 @@ func mustVersion(t *testing.T, c *CLI) string {
 		t.Fatal(err)
 	}
 	return v
+}
+
+// stableDir returns the entries of dir once they have not changed for
+// 300 ms: a killed restic may leave a lock file that is still being
+// written or renamed.
+func stableDir(t *testing.T, dir string) []os.DirEntry {
+	t.Helper()
+	names := func(e []os.DirEntry) string {
+		var s []string
+		for _, x := range e {
+			s = append(s, x.Name())
+		}
+		return strings.Join(s, ",")
+	}
+	prev, _ := os.ReadDir(dir)
+	for range 50 {
+		time.Sleep(300 * time.Millisecond)
+		cur, _ := os.ReadDir(dir)
+		if names(cur) == names(prev) {
+			return cur
+		}
+		prev = cur
+	}
+	return prev
 }
