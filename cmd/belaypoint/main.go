@@ -147,6 +147,8 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			Sessions:      auth.NewSessions(cfg.SessionTTL, time.Now),
 			Limiter:       auth.NewLimiter(time.Now),
 			Audit:         auditor{db, logger},
+			AuditLog:      db,
+			Location:      cfg.Location,
 			SetupCode:     setupCode,
 		}),
 		TLSConfig:         tlsConfig(cert),

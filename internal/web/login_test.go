@@ -256,3 +256,18 @@ func TestBadFormRejected(t *testing.T) {
 		t.Errorf("JSON body: %d, vault calls %d", w.Code, len(e.vault.seen))
 	}
 }
+
+func TestAuditPage(t *testing.T) {
+	e := newEnv(nil, true)
+	wantRedirect(t, getWithCookie(e.h, "/audit", ""), "/login")
+	w := post(e.h, "/login", "", url.Values{"password": {"correct horse battery"}}, nil)
+	cookie := sessionFromResponse(t, w)
+	w = getWithCookie(e.h, "/audit", cookie)
+	body := w.Body.String()
+	if w.Code != http.StatusOK || !strings.Contains(body, "unseal") || !strings.Contains(body, "1970-01-01 00:00:00") {
+		t.Fatalf("audit page: %d\n%s", w.Code, body)
+	}
+	if strings.Contains(body, "<script>") || !strings.Contains(body, "&lt;script&gt;") {
+		t.Error("details not HTML-escaped")
+	}
+}

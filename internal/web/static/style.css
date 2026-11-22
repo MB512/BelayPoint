@@ -21,9 +21,9 @@ header {
 .brand { font-weight: 700; color: var(--accent); }
 nav { display: flex; gap: .5rem; }
 nav form { margin: 0; }
-main { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; }
+main { max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
 h1 { font-size: 1.5rem; margin-top: 0; }
-footer { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: var(--muted); }
+footer { max-width: 60rem; margin: 2rem auto; padding: 0 1rem; color: var(--muted); }
 code { font-size: .9em; overflow-wrap: anywhere; }
 .stack { display: grid; gap: 1rem; }
 label { display: grid; gap: .25rem; font-weight: 600; }
@@ -43,3 +43,11 @@ button.link { background: none; color: var(--accent); padding: .5rem; }
 .warn { background: var(--warn-bg); }
 .ca { margin-top: 2rem; color: var(--muted); }
 .ca summary { cursor: pointer; }
+nav.main { flex: 1; gap: 1rem; }
+nav.main a { color: var(--fg); text-decoration: none; }
+nav.main a[aria-current="page"] { color: var(--accent); font-weight: 600; }
+a { color: var(--accent); }
+table { width: 100%; border-collapse: collapse; background: var(--card); }
+th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); }
+.nowrap { white-space: nowrap; }

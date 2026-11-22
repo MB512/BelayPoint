@@ -10,6 +10,10 @@
 <header>
 <span class="brand">BelayPoint</span>
 {{if .CSRF}}
+<nav class="main">
+<a href="/" aria-current="{{active .Title "Overview"}}">Overview</a>
+<a href="/audit" aria-current="{{active .Title "Audit log"}}">Audit log</a>
+</nav>
 <nav>
 <form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit" class="link" title="End this session; the vault stays unsealed and scheduled jobs keep running">Log out</button></form>
 <form method="post" action="/seal"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit" class="danger" title="Forget the vault key and end all sessions; nothing runs until the next login">Seal now</button></form>

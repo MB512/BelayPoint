@@ -17,6 +17,7 @@ import (
 
 	"github.com/MB512/belaypoint/internal/auth"
 	"github.com/MB512/belaypoint/internal/netguard"
+	"github.com/MB512/belaypoint/internal/store"
 )
 
 //go:embed templates/*.html
@@ -25,7 +26,14 @@ var templateFS embed.FS
 //go:embed static
 var staticFS embed.FS
 
-var templates = template.Must(template.ParseFS(templateFS, "templates/*.html"))
+var templates = template.Must(template.New("").Funcs(template.FuncMap{
+	"active": func(title, want string) string {
+		if title == want {
+			return "page"
+		}
+		return ""
+	},
+}).ParseFS(templateFS, "templates/*.html"))
 
 // Vault is the part of *vault.Vault the handlers use. (Go interfaces are
 // satisfied implicitly: *vault.Vault needs no "implements" declaration,
@@ -44,6 +52,11 @@ type Auditor interface {
 	Audit(ctx context.Context, event, details string)
 }
 
+// AuditLog reads the audit log (implemented by *store.Store).
+type AuditLog interface {
+	ListAudit(ctx context.Context, limit int, before int64) ([]store.AuditEntry, error)
+}
+
 // Options configure the handler.
 type Options struct {
 	Version string
@@ -58,6 +71,9 @@ type Options struct {
 	Sessions *auth.Sessions
 	Limiter  *auth.Limiter
 	Audit    Auditor
+	AuditLog AuditLog
+	// Location is the time zone for times shown in the UI (TZ).
+	Location *time.Location
 	// SetupCode must be entered to create the vault on first start (see
 	// auth.NewSetupCode). Empty when the vault already exists.
 	SetupCode string
@@ -96,6 +112,7 @@ func New(opts Options) http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireSession)
 		r.Get("/", s.home)
+		r.Get("/audit", s.auditPage)
 		r.Post("/logout", s.logout)
 		r.Post("/seal", s.seal)
 	})
@@ -131,6 +148,9 @@ type page struct {
 	Sealed bool
 	// setup page
 	MinPassword, MaxPassword int
+	// audit page
+	Audit      []auditRow
+	NextBefore int64
 }
 
 func (s *server) render(w http.ResponseWriter, status int, name string, p page) {

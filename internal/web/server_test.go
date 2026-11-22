@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/MB512/belaypoint/internal/auth"
+	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/vault"
 )
 
@@ -67,6 +68,18 @@ func (r *recorder) Audit(_ context.Context, event, _ string) {
 	r.events = append(r.events, event)
 }
 
+// ListAudit returns the recorded events newest first, with details
+// "<script>" to check escaping. Paging is ignored.
+func (r *recorder) ListAudit(_ context.Context, limit int, _ int64) ([]store.AuditEntry, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []store.AuditEntry
+	for i := len(r.events) - 1; i >= 0 && len(out) < limit; i-- {
+		out = append(out, store.AuditEntry{ID: int64(i + 1), Time: time.Unix(0, 0), Event: r.events[i], Details: "<script>"})
+	}
+	return out, nil
+}
+
 func (r *recorder) has(event string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -97,6 +110,8 @@ func newEnv(caPEM []byte, initialized bool) *testEnv {
 		Sessions:      auth.NewSessions(time.Hour, time.Now),
 		Limiter:       e.limiter,
 		Audit:         e.audit,
+		AuditLog:      e.audit,
+		Location:      time.UTC,
 		SetupCode:     code,
 	})
 	return e
