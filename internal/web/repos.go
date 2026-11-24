@@ -4,10 +4,13 @@ import (
 	"cmp"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/MB512/belaypoint/internal/jobs"
 	"github.com/MB512/belaypoint/internal/repos"
 	"github.com/MB512/belaypoint/internal/vault"
 )
@@ -16,16 +19,20 @@ import (
 // notifications fire).
 const StaleLockAge = 24 * time.Hour
 
+// StaleBackupAge is the age of the newest snapshot from which an active
+// (not archived) repository is listed under "Needs attention".
+const StaleBackupAge = 7 * 24 * time.Hour
+
+// maintenanceTypes are the job types shown as the maintenance status.
+var maintenanceTypes = []string{string(jobs.Maintenance), string(jobs.Forget), string(jobs.Prune), string(jobs.Check)}
+
 type repoRow struct {
-	Path    string
-	Owner   string
-	Missing bool
-	Size    string // "" until measured
-	Bytes   int64
-	Files   int64
-	// Share is the repository's part of the total size ("12 %"); the bar
-	// is scaled to the largest repository.
-	Share    string
+	Path     string
+	Owner    string
+	Missing  bool
+	Size     string // "" until measured
+	Bytes    int64
+	Files    int64
 	Measured string
 	Locks    int
 	// OldestLock is the age of the oldest lock file ("" if none);
@@ -34,13 +41,54 @@ type repoRow struct {
 	StaleLock  bool
 	LockError  bool
 	Password   bool
-	// Snapshots is "" until listed; SnapshotsTitle says when.
-	Snapshots      string
+	// SnapshotsTitle says when the snapshots were listed.
 	SnapshotsTitle string
 	// Busy: a job for this repository is queued or running.
 	Busy bool
 	// Archived: closed repository, no new backups expected.
 	Archived bool
+
+	// Overview columns. Name is the path without the user.
+	Name string
+	// LastBackup is the age of the newest snapshot ("3 days ago",
+	// "Feb 2019"); "" until listed. StaleBackup marks an active repository
+	// whose newest snapshot is older than StaleBackupAge.
+	LastBackup      string
+	LastBackupTitle string
+	StaleBackup     bool
+	SnapshotCount   string
+	// Maintenance: the newest maintenance job (nil if none) and the next
+	// scheduled run ("" if none).
+	LastJob *lastJob
+	NextRun string
+}
+
+// lastJob is the maintenance status of a repository on the overview.
+type lastJob struct {
+	ID         int64
+	Type, When string
+	State      string
+	OK         bool // succeeded
+	Active     bool // queued or running
+}
+
+// overviewData groups the repositories per user and lists what needs
+// attention.
+type overviewData struct {
+	Attention []attention
+	Groups    []repoGroup
+}
+
+type repoGroup struct {
+	Owner string
+	Size  string // sum of the measured repositories
+	Repos []repoRow
+}
+
+// attention is one line of "Needs attention": the repository, what is
+// wrong and where to fix it.
+type attention struct {
+	Path, Problem, Action, Link string
 }
 
 // home is the overview: all known repositories with what can be read
@@ -61,6 +109,10 @@ func (s *server) renderHome(w http.ResponseWriter, r *http.Request, status int, 
 		Title: "Overview", CSRF: sessionFrom(r.Context()).CSRF, Error: errMsg,
 		Scanning: s.Scanner.Scanning(), JobsAvailable: s.Jobs != nil,
 	}
+	last, err := s.JobList.LastJobs(r.Context(), maintenanceTypes)
+	if err != nil {
+		s.Logger.Error("reading last jobs", "err", err)
+	}
 	for _, repo := range list {
 		row := repoRow{
 			Path:     repo.Path,
@@ -69,6 +121,7 @@ func (s *server) renderHome(w http.ResponseWriter, r *http.Request, status int, 
 			Password: s.Vault.Has(vault.RepoSecret(repo.Path)),
 			Archived: repo.Archived,
 		}
+		row.Name = strings.TrimPrefix(repo.Path, row.Owner+"/")
 		if repo.Usage != nil {
 			row.Size = formatBytes(repo.Usage.Bytes)
 			row.Bytes = repo.Usage.Bytes
@@ -76,24 +129,34 @@ func (s *server) renderHome(w http.ResponseWriter, r *http.Request, status int, 
 			row.Measured = repo.UsageTime.In(s.Location).Format("2006-01-02 15:04")
 		}
 		if sn := repo.Snapshots; sn != nil {
-			row.Snapshots = strconv.Itoa(sn.Count)
-			if !sn.Newest.IsZero() {
-				row.Snapshots += ", newest " + formatAge(now.Sub(sn.Newest)) + " ago"
-			}
+			row.SnapshotCount = strconv.Itoa(sn.Count)
 			row.SnapshotsTitle = "listed " + sn.Time.In(s.Location).Format("2006-01-02 15:04")
+			if !sn.Newest.IsZero() {
+				row.LastBackup = humanAge(now, sn.Newest, s.Location)
+				row.LastBackupTitle = sn.Newest.In(s.Location).Format("2006-01-02 15:04")
+				row.StaleBackup = !repo.Archived && now.Sub(sn.Newest) > StaleBackupAge
+			}
+		}
+		if j, ok := last[repo.Path]; ok {
+			row.LastJob = &lastJob{
+				ID: j.ID, Type: j.Type, State: j.State, OK: j.State == jobs.StateSucceeded,
+				Active: j.State == jobs.StateQueued || j.State == jobs.StateRunning,
+				When:   humanAge(now, cmp.Or(j.Finished, j.Started, j.Queued), s.Location),
+			}
 		}
 		if !repo.Missing {
 			s.addLocks(&row, now)
 			row.Busy = s.Jobs != nil && s.Jobs.Busy(repo.Path)
+			if s.Schedule != nil {
+				if next := s.Schedule.Next(repo.Path); !next.IsZero() {
+					row.NextRun = next.In(s.Location).Format("Mon 02 Jan 15:04")
+				}
+			}
 		}
 		p.Repos = append(p.Repos, row)
 	}
-	p.Owners, p.Total = summarize(p.Repos)
-	for i := range p.Repos {
-		if p.Repos[i].Size != "" && !p.Repos[i].Missing {
-			p.Repos[i].Share = percent(p.Repos[i].Bytes, p.Total.Bytes)
-		}
-	}
+	_, p.Total = summarize(p.Repos)
+	p.Overview = overview(p.Repos)
 	s.render(w, status, "home.html", p)
 }
 
@@ -234,4 +297,73 @@ func formatAge(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%d d", int(d.Hours()/24))
 	}
+}
+
+// overview groups the rows per user (users and repositories by name, as
+// listed) and collects what needs attention, in table order.
+func overview(rows []repoRow) *overviewData {
+	d := &overviewData{}
+	for _, r := range rows {
+		if n := len(d.Groups); n == 0 || d.Groups[n-1].Owner != r.Owner {
+			d.Groups = append(d.Groups, repoGroup{Owner: r.Owner})
+		}
+		d.Groups[len(d.Groups)-1].Repos = append(d.Groups[len(d.Groups)-1].Repos, r)
+		d.Attention = append(d.Attention, problems(r)...)
+	}
+	// Users sorted by name (the rows come sorted by path, so a user's
+	// repositories are already together).
+	slices.SortStableFunc(d.Groups, func(a, b repoGroup) int { return cmp.Compare(a.Owner, b.Owner) })
+	for i := range d.Groups {
+		var sum int64
+		for _, r := range d.Groups[i].Repos {
+			if !r.Missing {
+				sum += r.Bytes
+			}
+		}
+		d.Groups[i].Size = formatBytes(sum)
+	}
+	return d
+}
+
+// problems lists what needs attention for one repository.
+func problems(r repoRow) []attention {
+	view := "/repos/view?repo=" + url.QueryEscape(r.Path)
+	if r.Missing {
+		return []attention{{r.Path, "no longer found below the repository root", "", ""}}
+	}
+	var out []attention
+	if !r.Password {
+		out = append(out, attention{r.Path, "no password stored: nothing can run", "Set password", "/repos/password?repo=" + url.QueryEscape(r.Path)})
+	}
+	if j := r.LastJob; j != nil && !j.OK && !j.Active {
+		out = append(out, attention{r.Path, j.Type + " " + j.State + " " + j.When, "Show log", "/jobs/" + strconv.FormatInt(j.ID, 10) + "/log"})
+	}
+	if r.LockError {
+		out = append(out, attention{r.Path, "lock files cannot be read", "", ""})
+	} else if r.StaleLock {
+		out = append(out, attention{r.Path, "lock older than 24 h: probably stale", "Unlock", view + "&tab=run"})
+	}
+	if r.StaleBackup {
+		out = append(out, attention{r.Path, "no recent backup (last one " + r.LastBackup + ")", "Mark as archive?", view})
+	}
+	return out
+}
+
+// humanAge says how long ago t was, coarser the older it is: "5 min ago",
+// "7 h ago", "3 days ago", "5 weeks ago", then the month ("Feb 2019").
+func humanAge(now, t time.Time, loc *time.Location) string {
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%d h ago", int(d.Hours()))
+	case d < 14*24*time.Hour:
+		return fmt.Sprintf("%d days ago", int(d.Hours()/24))
+	case d < 8*7*24*time.Hour:
+		return fmt.Sprintf("%d weeks ago", int(d.Hours()/24/7))
+	}
+	return t.In(loc).Format("Jan 2006")
 }

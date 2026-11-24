@@ -32,6 +32,7 @@ type Jobs interface {
 type JobList interface {
 	ListJobs(ctx context.Context, limit int, before int64) ([]store.Job, error)
 	Job(ctx context.Context, id int64) (store.Job, error)
+	LastJobs(ctx context.Context, types []string) (map[string]store.Job, error)
 }
 
 const jobsPageSize = 100

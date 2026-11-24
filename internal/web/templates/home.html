@@ -1,58 +1,45 @@
 {{template "top" .}}
-<div class="toolbar">
-<p class="muted">Repositories found below the repository root. Disk usage is measured in the background
-at start and on rescan; lock files are read live.</p>
-<div class="buttons">
-{{if .JobsAvailable}}<form method="post" action="/repos/snapshots"><input type="hidden" name="csrf_token" value="{{.CSRF}}">
-<button type="submit" title="List the snapshots of every repository with a stored password">Refresh snapshots</button></form>{{end}}
-<form method="post" action="/repos/rescan"><input type="hidden" name="csrf_token" value="{{.CSRF}}">
-<button type="submit" {{if .Scanning}}disabled{{end}}>{{if .Scanning}}Scanning…{{else}}Rescan{{end}}</button></form>
-</div>
-</div>
 {{if .Repos}}
-<table>
-<thead><tr><th>Repository</th><th>User</th><th class="num">Size</th><th class="bar">Share</th><th class="num">Files</th><th>Snapshots</th><th>Locks</th><th>Password</th></tr></thead>
-<tbody>
-{{range .Repos}}<tr{{if .Missing}} class="missing"{{end}}>
-<td>{{if .Missing}}<code>{{.Path}}</code>{{else}}<a href="/repos/view?repo={{.Path}}"><code>{{.Path}}</code></a>{{end}}{{if .Missing}} <span class="badge">missing</span>{{end}}{{if .Archived}} <span class="badge">archive</span>{{end}}</td>
-<td>{{.Owner}}</td>
-<td class="num nowrap">{{if .Size}}<span title="measured {{.Measured}}">{{.Size}}</span>{{else if not .Missing}}…{{end}}</td>
-<td class="bar">{{if .Share}}<meter min="0" max="{{$.Total.MaxBytes}}" value="{{.Bytes}}" title="{{.Share}} of the total"></meter> <span class="muted">{{.Share}}</span>{{end}}</td>
-<td class="num">{{if .Size}}{{.Files}}{{end}}</td>
-<td class="nowrap">{{if .Busy}}<span class="badge">job running</span>{{else if .Snapshots}}<span title="{{.SnapshotsTitle}}">{{.Snapshots}}</span>{{end}}
-{{if and $.JobsAvailable .Password (not .Missing) (not .Busy)}}<form method="post" action="/repos/snapshots"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="repo" value="{{.Path}}"><button type="submit" class="link small" title="Refresh snapshots">↻</button></form>{{end}}</td>
-<td class="nowrap">{{if .LockError}}<span class="badge bad">unreadable</span>{{else if .Locks}}<a href="/repos/view?repo={{.Path}}&amp;tab=run" title="Unlock on the repository's Run now tab{{if .StaleLock}}; older than 24 h: probably stale{{end}}"><span class="badge{{if .StaleLock}} bad{{end}}">{{.Locks}}, oldest {{.OldestLock}}</span></a>{{else if not .Missing}}none{{end}}</td>
-<td class="nowrap">{{if .Missing}}{{if .Password}}stored{{end}}{{else}}<a href="/repos/password?repo={{.Path}}">{{if .Password}}stored{{else}}set…{{end}}</a>{{end}}</td>
-</tr>
+{{with .Overview}}
+{{if .Attention}}
+<section class="attention" aria-labelledby="attention-h">
+<h2 id="attention-h">Needs attention ({{len .Attention}})</h2>
+<ul>
+{{range .Attention}}<li><a href="/repos/view?repo={{.Path}}"><code>{{.Path}}</code></a> <span>{{.Problem}}</span>{{if .Link}} <a class="action" href="{{.Link}}">{{.Action}}</a>{{end}}</li>
 {{end}}
-</tbody>
-</table>
+</ul>
+</section>
+{{else}}
+<p class="allok"><span aria-hidden="true">✓</span> All OK: every repository has a password, its last maintenance succeeded, no stale locks, and every active repository had a backup in the last 7 days.</p>
+{{end}}
 
-{{if .Owners}}
-<h2>Per user</h2>
-<p class="muted">Sums of the present repositories, largest first. Bars are scaled to the largest
-(repository above, user here); the percentage is the share of the total.</p>
-<table>
-<thead><tr><th>User</th><th class="num">Repositories</th><th class="num">Size</th><th class="bar">Share</th><th class="num">Files</th></tr></thead>
-<tbody>
-{{range .Owners}}<tr>
-<td>{{.Name}}</td>
-<td class="num">{{.Repos}}</td>
-<td class="num nowrap">{{.Size}}{{if .Unmeasured}} <span class="muted" title="{{.Unmeasured}} not measured yet">+ …</span>{{end}}</td>
-<td class="bar">{{if .Share}}<meter min="0" max="{{.MaxBytes}}" value="{{.Bytes}}" title="{{.Share}} of the total"></meter> <span class="muted">{{.Share}}</span>{{end}}</td>
-<td class="num">{{.Files}}</td>
+<table class="overview">
+<thead><tr><th>Repository</th><th>Maintenance</th><th>Last backup</th><th class="num">Snapshots</th><th class="num">Size</th></tr></thead>
+{{range .Groups}}<tbody>
+<tr class="group"><th colspan="5" scope="rowgroup"><strong>{{.Owner}}</strong> <span class="muted">{{len .Repos}} {{if eq (len .Repos) 1}}repository{{else}}repositories{{end}} · {{.Size}}</span></th></tr>
+{{range .Repos}}<tr{{if .Missing}} class="missing"{{end}}>
+<td>{{if .Missing}}<code>{{.Name}}</code> <span class="badge">missing</span>{{else}}<a href="/repos/view?repo={{.Path}}"><code>{{.Name}}</code></a>{{end}}
+{{if .Archived}}<span class="badge">archive</span>{{end}}
+{{if .Locks}}<a href="/repos/view?repo={{.Path}}&amp;tab=run" class="badge{{if .StaleLock}} bad{{end}}" title="{{.Locks}} lock(s), oldest {{.OldestLock}}">locked</a>{{end}}</td>
+<td class="maint">{{if .Busy}}<span class="badge">job running</span>
+{{else}}{{with .LastJob}}<a href="/jobs/{{.ID}}/log" class="status {{if .OK}}ok{{else if .Active}}active{{else}}bad{{end}}" title="Show the log">{{if .OK}}✓{{else if .Active}}…{{else}}✗{{end}} {{.Type}} {{if .OK}}{{.When}}{{else if .Active}}{{.State}}{{else}}{{.State}} {{.When}}{{end}}</a>{{else}}<span class="muted">no run yet</span>{{end}}{{end}}
+<br><small class="muted">{{if .NextRun}}next {{.NextRun}}{{else if not .Missing}}no schedule{{end}}</small></td>
+<td class="nowrap{{if .StaleBackup}} stale{{end}}">{{if .LastBackup}}<span title="{{.LastBackupTitle}}">{{.LastBackup}}</span>{{else if .SnapshotCount}}<span class="muted">no snapshots</span>{{end}}</td>
+<td class="num nowrap">{{if .SnapshotCount}}<span title="{{.SnapshotsTitle}}">{{.SnapshotCount}}</span>{{end}}
+{{if and $.JobsAvailable .Password (not .Missing) (not .Busy)}}<form method="post" action="/repos/snapshots" class="inline"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="repo" value="{{.Path}}"><button type="submit" class="link small" title="Refresh snapshots">↻</button></form>{{end}}</td>
+<td class="num nowrap">{{if .Size}}<span title="measured {{.Measured}}">{{.Size}}</span>{{else if not .Missing}}…{{end}}</td>
 </tr>
+{{end}}</tbody>
 {{end}}
-</tbody>
-<tfoot><tr>
-<th>Total</th>
-<th class="num">{{.Total.Repos}}</th>
-<th class="num nowrap">{{.Total.Size}}{{if .Total.Unmeasured}} <span class="muted" title="{{.Total.Unmeasured}} not measured yet">+ …</span>{{end}}</th>
-<th></th>
-<th class="num">{{.Total.Files}}</th>
-</tr></tfoot>
 </table>
 {{end}}
+<div class="buttons toolbar-bottom">
+{{if .JobsAvailable}}<form method="post" action="/repos/snapshots"><input type="hidden" name="csrf_token" value="{{.CSRF}}">
+<button type="submit" class="secondary" title="List the snapshots of every repository with a stored password">Refresh snapshots</button></form>{{end}}
+<form method="post" action="/repos/rescan"><input type="hidden" name="csrf_token" value="{{.CSRF}}">
+<button type="submit" class="secondary" {{if .Scanning}}disabled{{end}} title="Look for new repositories and measure the disk usage again">{{if .Scanning}}Scanning…{{else}}Rescan{{end}}</button></form>
+<a href="/storage">Storage details</a>
+</div>
 {{else if .Scanning}}
 <p>Scanning…</p>
 {{else}}

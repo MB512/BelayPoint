@@ -240,27 +240,41 @@ disk usage walk of each repository (stored in the database). Before a
 repository directory is used, its path is checked again component by
 component: no symlink, no `..`, no hidden component.
 
-Per repository the UI shows:
+Per repository BelayPoint knows:
 
-- disk usage (walk of the directory; works while sealed) with a bar scaled
-  to the largest repository and its share of the total,
+- disk usage (walk of the directory; works while sealed),
 - number and age of lock files (file names and modification times, read live;
   works while sealed; flagged when older than 24 hours),
 - snapshot count and age of the newest snapshot, cached from the last
   `snapshots` job (needs the password; queued automatically after a password
   is stored, and by "Refresh snapshots" for one or all repositories),
-- lock details (needs the password: lock files are encrypted),
-- maintenance plan, last runs and their results.
+- maintenance plan, last runs and their results,
+- the archive flag (see "Repository page").
 
 Every page behind the login shows a bar with the used and free space of the
 volume holding `/repos` (statfs), with the backups' total on the overview. It
 turns yellow at 80 % and red with a warning at 90 %: `prune` needs free space
 to rewrite packs.
 
-Below the repository table, a per-user summary (the user is the first path component, as with
-`--private-repos`) sums repositories, size and files, largest first, with a
-total. Missing repositories are not counted; repositories not measured yet
-are counted but marked, since their size is not in the sum.
+### Overview
+
+The overview (#7) answers "is everything OK, and where do I have to act?":
+
+- **Needs attention** lists, per repository: no password stored, the last
+  maintenance job (maintenance, forget, prune or check) failed, was refused,
+  interrupted or skipped, a stale lock (older than 24 h) or unreadable lock
+  files, an active repository whose newest snapshot is older than 7 days
+  (`StaleBackupAge`; archives are exempt), a repository no longer found.
+  Each entry links to where it is fixed (password page, job log, Run now
+  tab, repository page). Without problems a single "All OK" line is shown.
+- The repositories are **grouped by user** (the first path component, as
+  with `--private-repos`), users and repositories sorted by name, each
+  group with its count and size. Columns: repository (with archive, missing
+  and locked badges), **maintenance** (last job with result and age, linked
+  to its log, and the next scheduled run), last backup (readable age:
+  "3 days ago", older ones as month "Oct 2019"), snapshots (with a refresh
+  button) and size.
+- Storage statistics (share, files, per-user sums) are on the Storage page.
 
 ### Storage page
 

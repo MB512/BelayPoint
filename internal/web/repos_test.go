@@ -62,14 +62,21 @@ func TestOverview(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("overview: %d", w.Code)
 	}
-	for _, want := range []string{"alice/main", "3.0 GiB", "42", "100 %", "Per user", "<meter", "bob/main", "1, oldest 30 h", "badge bad", "gone/repo", "missing", "stored", "set…", "/repos/password?repo=bob%2fmain"} {
+	for _, want := range []string{
+		// grouped per user, name without the user
+		`scope="rowgroup"><strong>alice</strong>`, `<code>main</code>`, "3.0 GiB", `scope="rowgroup"><strong>bob</strong>`, `scope="rowgroup"><strong>gone</strong>`, "missing",
+		// needs attention: bob has no password and a stale lock, gone/repo is missing
+		"Needs attention (3)", "no password stored", `href="/repos/password?repo=bob%2Fmain">Set password`, "lock older than 24 h",
+		"no longer found below the repository root", `class="badge bad"`,
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("overview lacks %q", want)
 		}
 	}
-	// Locks link to the Run now tab; unlocking happens there.
-	if !strings.Contains(body, `href="/repos/view?repo=bob%2fmain&amp;tab=run"`) || strings.Contains(body, "/repos/unlock") {
-		t.Error("overview: locks not linked to the Run now tab, or unlock buttons left")
+	// Locks link to the Run now tab; unlocking happens there. The storage
+	// statistics moved to the Storage page.
+	if !strings.Contains(body, `href="/repos/view?repo=bob%2fmain&amp;tab=run"`) || strings.Contains(body, "/repos/unlock") || strings.Contains(body, "Per user") {
+		t.Error("overview: locks not linked to the Run now tab, unlock buttons or storage statistics left")
 	}
 	e.vault.secrets = append(e.vault.secrets, vault.RepoSecret("bob/main"))
 	run := getWithCookie(e.h, "/repos/view?repo=bob/main&tab=run", cookie).Body.String()
@@ -170,5 +177,64 @@ func TestDiskBar(t *testing.T) {
 	}
 	if body := get(e.h, "/login", nil).Body.String(); strings.Contains(body, `class="disk`) {
 		t.Error("disk bar shown before login")
+	}
+}
+
+func TestOverviewAttention(t *testing.T) {
+	now := time.Now()
+	ok := repoRow{Path: "a/ok", Owner: "a", Password: true, LastJob: &lastJob{ID: 1, Type: "maintenance", OK: true}}
+	for _, c := range []struct {
+		name string
+		row  repoRow
+		want []string // problem texts
+	}{
+		{"all fine", ok, nil},
+		{"no password", repoRow{Path: "a/x", Owner: "a"}, []string{"no password stored: nothing can run"}},
+		{"failed", repoRow{Path: "a/x", Owner: "a", Password: true, LastJob: &lastJob{ID: 7, Type: "prune", State: "failed", When: "2 h ago"}}, []string{"prune failed 2 h ago"}},
+		{"skipped", repoRow{Path: "a/x", Owner: "a", Password: true, LastJob: &lastJob{ID: 7, Type: "maintenance", State: "skipped", When: "3 days ago"}}, []string{"maintenance skipped 3 days ago"}},
+		{"running is fine", repoRow{Path: "a/x", Owner: "a", Password: true, LastJob: &lastJob{ID: 7, Type: "check", State: "running", Active: true}}, nil},
+		{"stale lock", repoRow{Path: "a/x", Owner: "a", Password: true, Locks: 1, StaleLock: true}, []string{"lock older than 24 h: probably stale"}},
+		{"stale backup", repoRow{Path: "a/x", Owner: "a", Password: true, StaleBackup: true, LastBackup: "Feb 2019"}, []string{"no recent backup (last one Feb 2019)"}},
+		{"missing", repoRow{Path: "a/x", Owner: "a", Missing: true}, []string{"no longer found below the repository root"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var got []string
+			for _, a := range problems(c.row) {
+				got = append(got, a.Problem)
+			}
+			if strings.Join(got, "|") != strings.Join(c.want, "|") {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+	_ = now
+}
+
+func TestOverviewGroups(t *testing.T) {
+	d := overview([]repoRow{
+		{Path: "bob/1", Owner: "bob", Bytes: 2, Size: "2 B", Password: true},
+		{Path: "alice/1", Owner: "alice", Bytes: 1 << 30, Size: "1.0 GiB", Password: true},
+		{Path: "alice/2", Owner: "alice", Bytes: 1 << 30, Size: "1.0 GiB", Password: true},
+		{Path: "alice/old", Owner: "alice", Bytes: 1 << 40, Missing: true, Password: true},
+	})
+	if len(d.Groups) != 2 || d.Groups[0].Owner != "alice" || len(d.Groups[0].Repos) != 3 || d.Groups[0].Size != "2.0 GiB" || d.Groups[1].Owner != "bob" {
+		t.Errorf("groups %+v", d.Groups)
+	}
+}
+
+func TestHumanAge(t *testing.T) {
+	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	for d, want := range map[time.Duration]string{
+		10 * time.Second:      "just now",
+		5 * time.Minute:       "5 min ago",
+		32 * time.Hour:        "32 h ago",
+		3 * 24 * time.Hour:    "3 days ago",
+		20 * 24 * time.Hour:   "2 weeks ago",
+		153 * 24 * time.Hour:  "Jun 2026",
+		2594 * 24 * time.Hour: "Oct 2019",
+	} {
+		if got := humanAge(now, now.Add(-d), time.UTC); got != want {
+			t.Errorf("%v: %q, want %q", d, got, want)
+		}
 	}
 }

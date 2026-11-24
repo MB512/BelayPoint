@@ -67,8 +67,11 @@ func TestOverviewSnapshots(t *testing.T) {
 	_ = e.store.SyncRepos(ctx, []string{"alice/main"})
 	_ = e.store.SetRepoSnapshots(ctx, "alice/main", 17, time.Now().Add(-5*time.Hour), time.Now())
 	cookie := login(t, e)
-	if body := getWithCookie(e.h, "/", cookie).Body.String(); !strings.Contains(body, "17, newest 5 h ago") {
-		t.Error("overview lacks the snapshot summary")
+	body := getWithCookie(e.h, "/", cookie).Body.String()
+	for _, want := range []string{">17<", ">5 h ago<"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("overview lacks %q", want)
+		}
 	}
 }
 

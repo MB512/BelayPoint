@@ -214,7 +214,7 @@ type page struct {
 	NextBefore int64
 	// overview
 	Repos    []repoRow
-	Owners   []ownerRow
+	Overview *overviewData
 	Total    ownerRow
 	Scanning bool
 	// users pages
