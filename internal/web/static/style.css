@@ -83,7 +83,6 @@ button.small { padding: 0 .4rem; font-size: .85em; }
 .disk.full { background: var(--error-bg); }
 pre.log { padding: .75rem 1rem; background: var(--card); border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
 a.small { font-size: .85em; }
-.policy .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: .75rem; }
 h3 { font-size: 1rem; margin: 1.5rem 0 .25rem; }
 details summary { cursor: pointer; }
 a.button { display: inline-block; padding: .5rem 1rem; border-radius: 6px; color: #fff; background: var(--accent); text-decoration: none; }
@@ -97,6 +96,16 @@ label.check { display: flex; align-items: center; gap: .5rem; font-weight: 400; 
 input.masked { -webkit-text-security: disc; font-family: monospace; }
 fieldset { border: 1px solid var(--line); border-radius: 6px; display: grid; gap: .25rem; }
 legend { font-weight: 600; padding: 0 .25rem; }
-table.tagrules input { width: 100%; min-width: 4rem; }
-table.tagrules td { padding: .2rem .3rem; }
+/* Retention table: tag rules plus the "all other snapshots" row. On narrow
+   screens the table scrolls inside its box, the page itself does not. */
+.scroll { overflow-x: auto; }
+table.keeptable td, table.keeptable th { padding: .2rem .3rem; }
+table.keeptable input { width: 100%; min-width: 3.5rem; }
+table.keeptable td:first-child input { min-width: 7rem; }
+table.keeptable tr.others td { border-top: 2px solid var(--line); }
+table.keeptable tr.others em { white-space: nowrap; color: var(--muted); }
+button.remove { width: 1.75rem; height: 1.75rem; padding: 0; border-radius: 50%; line-height: 1;
+  font-size: 1.1rem; font-weight: 700; color: var(--danger); background: none; border: 2px solid var(--danger); }
+button.remove:hover, button.remove:focus-visible { color: #fff; background: var(--danger); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 h4 { font-size: .95rem; margin: 1rem 0 .25rem; }

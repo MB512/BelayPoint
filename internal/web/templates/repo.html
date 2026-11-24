@@ -45,38 +45,43 @@ unsealed; a run while sealed (or while another job for this repository runs) is 
 
 <h2>Retention policy</h2>
 <p class="muted">{{if .Custom}}This repository has its own policy.{{else}}The default policy applies.{{end}}
-Snapshots are grouped by host and paths: every client and every backup set keeps its own history.
-A snapshot is kept if any rule matches. Empty fields are not used.</p>
+Rows with a tag apply first, to the snapshots with that tag (e.g. StackBelay's <code>pre-stop</code> snapshots);
+the last row covers all other snapshots. Snapshots are grouped by host and paths: every client and every backup set
+keeps its own history. A snapshot is kept if any value of its row matches; empty fields are not used.
+Within takes a duration such as <code>14d</code>, <code>6m</code> or <code>1y6m</code>.</p>
 <form method="post" class="stack policy">
 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
 <input type="hidden" name="repo" value="{{.Path}}">
-<div class="grid">
-<label>Last <small>newest n</small><input type="number" name="keep_last" min="0" value="{{if .Policy.KeepLast}}{{.Policy.KeepLast}}{{end}}"></label>
-<label>Hourly<input type="number" name="keep_hourly" min="0" value="{{if .Policy.KeepHourly}}{{.Policy.KeepHourly}}{{end}}"></label>
-<label>Daily<input type="number" name="keep_daily" min="0" value="{{if .Policy.KeepDaily}}{{.Policy.KeepDaily}}{{end}}"></label>
-<label>Weekly<input type="number" name="keep_weekly" min="0" value="{{if .Policy.KeepWeekly}}{{.Policy.KeepWeekly}}{{end}}"></label>
-<label>Monthly<input type="number" name="keep_monthly" min="0" value="{{if .Policy.KeepMonthly}}{{.Policy.KeepMonthly}}{{end}}"></label>
-<label>Yearly<input type="number" name="keep_yearly" min="0" value="{{if .Policy.KeepYearly}}{{.Policy.KeepYearly}}{{end}}"></label>
-<label>Within <small>e.g. 14d, 6m, 1y6m</small><input type="text" name="keep_within" value="{{.Policy.KeepWithin}}" pattern="([0-9]+[ymdh])+"></label>
-</div>
-<h3>Tag rules</h3>
-<p class="muted">Snapshots with one of these tags get their own retention, applied first; the policy above then only
-sees the snapshots without such a tag. Example: StackBelay's <code>pre-stop</code> snapshots are taken while a stack
-still runs (not consistent); the <code>final</code> snapshot follows. Clear the tag to remove a rule.</p>
-<table class="tagrules">
-<thead><tr><th>Tag</th><th>Last</th><th>Daily</th><th>Weekly</th><th>Monthly</th><th>Within</th></tr></thead>
+<div class="scroll">
+<table class="keeptable">
+<thead><tr><th>Tag</th><th>Last</th><th>Hourly</th><th>Daily</th><th>Weekly</th><th>Monthly</th><th>Yearly</th><th>Within</th><th><span class="sr">Remove</span></th></tr></thead>
 <tbody>
 {{range .TagRows}}<tr>
-<td><input type="text" name="tag_{{.Index}}" value="{{.Tag}}" placeholder="{{if eq .Index 1}}pre-stop{{end}}" spellcheck="false" autocomplete="off" pattern="[A-Za-z0-9_][A-Za-z0-9._:@+\-]{0,63}"></td>
-<td><input type="number" name="tag_{{.Index}}_last" min="0" value="{{.Last}}"></td>
-<td><input type="number" name="tag_{{.Index}}_daily" min="0" value="{{.Daily}}"></td>
-<td><input type="number" name="tag_{{.Index}}_weekly" min="0" value="{{.Weekly}}"></td>
-<td><input type="number" name="tag_{{.Index}}_monthly" min="0" value="{{.Monthly}}"></td>
-<td><input type="text" name="tag_{{.Index}}_within" value="{{.Within}}" pattern="([0-9]+[ymdh])+" spellcheck="false" autocomplete="off"></td>
+<td><input type="text" name="tag_{{.Index}}" value="{{.Tag}}" aria-label="Tag" placeholder="{{if not .Tag}}new tag{{end}}" spellcheck="false" autocomplete="off" pattern="[A-Za-z0-9_][A-Za-z0-9._:@+\-]{0,63}"></td>
+<td><input type="number" name="tag_{{.Index}}_last" min="0" value="{{.Last}}" aria-label="Last"></td>
+<td><input type="number" name="tag_{{.Index}}_hourly" min="0" value="{{.Hourly}}" aria-label="Hourly"></td>
+<td><input type="number" name="tag_{{.Index}}_daily" min="0" value="{{.Daily}}" aria-label="Daily"></td>
+<td><input type="number" name="tag_{{.Index}}_weekly" min="0" value="{{.Weekly}}" aria-label="Weekly"></td>
+<td><input type="number" name="tag_{{.Index}}_monthly" min="0" value="{{.Monthly}}" aria-label="Monthly"></td>
+<td><input type="number" name="tag_{{.Index}}_yearly" min="0" value="{{.Yearly}}" aria-label="Yearly"></td>
+<td><input type="text" name="tag_{{.Index}}_within" value="{{.Within}}" aria-label="Within" pattern="([0-9]+[ymdh])+" spellcheck="false" autocomplete="off"></td>
+<td>{{if .Tag}}<button type="submit" class="remove" formaction="/repos/policy" formnovalidate name="remove_rule" value="{{.Index}}"
+ title="Remove the rule for tag {{.Tag}} (saves the policy)" aria-label="Remove the rule for tag {{.Tag}}">×</button>{{end}}</td>
 </tr>
-{{end}}
+{{end}}<tr class="others">
+<td><em>all other snapshots</em></td>
+<td><input type="number" name="keep_last" min="0" value="{{if .Policy.KeepLast}}{{.Policy.KeepLast}}{{end}}" aria-label="Last"></td>
+<td><input type="number" name="keep_hourly" min="0" value="{{if .Policy.KeepHourly}}{{.Policy.KeepHourly}}{{end}}" aria-label="Hourly"></td>
+<td><input type="number" name="keep_daily" min="0" value="{{if .Policy.KeepDaily}}{{.Policy.KeepDaily}}{{end}}" aria-label="Daily"></td>
+<td><input type="number" name="keep_weekly" min="0" value="{{if .Policy.KeepWeekly}}{{.Policy.KeepWeekly}}{{end}}" aria-label="Weekly"></td>
+<td><input type="number" name="keep_monthly" min="0" value="{{if .Policy.KeepMonthly}}{{.Policy.KeepMonthly}}{{end}}" aria-label="Monthly"></td>
+<td><input type="number" name="keep_yearly" min="0" value="{{if .Policy.KeepYearly}}{{.Policy.KeepYearly}}{{end}}" aria-label="Yearly"></td>
+<td><input type="text" name="keep_within" value="{{.Policy.KeepWithin}}" aria-label="Within" pattern="([0-9]+[ymdh])+" spellcheck="false" autocomplete="off"></td>
+<td></td>
+</tr>
 </tbody>
 </table>
+</div>
 <div class="buttons">
 {{if $.JobsAvailable}}<button type="submit" formaction="/repos/forget-preview" title="forget --dry-run: shows what would be removed, changes nothing">Preview</button>{{end}}
 <button type="submit" formaction="/repos/policy">Save policy</button>

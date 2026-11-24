@@ -104,9 +104,9 @@ func (s *server) renderRepo(w http.ResponseWriter, r *http.Request, status int, 
 	})
 }
 
-// policyFromForm reads the main keep fields and the tag rule rows
-// (tag_<i>, tag_<i>_<field>); empty fields are 0, rows without a tag are
-// ignored.
+// policyFromForm reads the "all other snapshots" row (keep_<field>) and the
+// tag rule rows (tag_<i>, tag_<i>_<field>); empty fields are 0. Empty rows
+// are ignored; remove_rule=<i> (the row's × button) leaves rule i out.
 func policyFromForm(f form) (restic.Policy, error) {
 	num := func(name, label string) (int, error) {
 		v := strings.TrimSpace(f.get(name))
@@ -119,13 +119,13 @@ func policyFromForm(f form) (restic.Policy, error) {
 		}
 		return n, nil
 	}
-	keep := func(prefix, label string, fields []string) (restic.Keep, error) {
+	keep := func(prefix, label string) (restic.Keep, error) {
 		var k restic.Keep
 		dst := map[string]*int{
 			"last": &k.KeepLast, "hourly": &k.KeepHourly, "daily": &k.KeepDaily,
 			"weekly": &k.KeepWeekly, "monthly": &k.KeepMonthly, "yearly": &k.KeepYearly,
 		}
-		for _, name := range fields {
+		for _, name := range numericKeepFields {
 			n, err := num(prefix+name, label+"keep "+name)
 			if err != nil {
 				return k, err
@@ -137,34 +137,51 @@ func policyFromForm(f form) (restic.Policy, error) {
 	}
 	var p restic.Policy
 	var err error
-	if p.Keep, err = keep("keep_", "", []string{"last", "hourly", "daily", "weekly", "monthly", "yearly"}); err != nil {
+	if p.Keep, err = keep("keep_", ""); err != nil {
 		return p, err
 	}
+	var rowErr error // reported after reading all rows, so the form keeps them
+	removed := f.get("remove_rule")
 	for i := 1; i <= restic.MaxTagRules; i++ {
-		prefix := "tag_" + strconv.Itoa(i)
+		index := strconv.Itoa(i)
+		if index == removed {
+			continue // the row's × button: save without this rule
+		}
+		prefix := "tag_" + index
 		tag := strings.TrimSpace(f.get(prefix))
 		if tag == "" {
+			// A row with values but no tag is a mistake (rules are removed
+			// with ×), not a reason to drop the values silently.
+			for _, name := range append(numericKeepFields, "within") {
+				if rowErr == nil && strings.TrimSpace(f.get(prefix+"_"+name)) != "" {
+					rowErr = fmt.Errorf("%w: row %d has values but no tag; enter a tag or clear the row", restic.ErrPolicy, i)
+				}
+			}
 			continue
 		}
-		k, err := keep(prefix+"_", "tag "+tag+": ", tagRuleFields)
+		k, err := keep(prefix+"_", "tag "+tag+": ")
 		if err != nil {
 			return p, err
 		}
 		p.TagRules = append(p.TagRules, restic.TagRule{Tag: tag, Keep: k})
 	}
+	if rowErr != nil {
+		return p, rowErr
+	}
 	return p, p.Validate()
 }
 
-// tagRuleFields are the keep fields offered for tag rules.
-var tagRuleFields = []string{"last", "daily", "weekly", "monthly"}
+// numericKeepFields are the field name suffixes of a policy row's numbers;
+// each row also has "within".
+var numericKeepFields = []string{"last", "hourly", "daily", "weekly", "monthly", "yearly"}
 
 // tagRow is one row of the tag rule table; the form always has an empty
 // row to add a rule, up to restic.MaxTagRules.
 type tagRow struct {
-	Index                        int
-	Tag                          string
-	Last, Daily, Weekly, Monthly string
-	Within                       string
+	Index                                        int
+	Tag                                          string
+	Last, Hourly, Daily, Weekly, Monthly, Yearly string
+	Within                                       string
 }
 
 func tagRows(p restic.Policy) []tagRow {
@@ -177,8 +194,8 @@ func tagRows(p restic.Policy) []tagRow {
 	var rows []tagRow
 	for i, r := range p.TagRules {
 		rows = append(rows, tagRow{
-			Index: i + 1, Tag: r.Tag, Last: n(r.KeepLast), Daily: n(r.KeepDaily),
-			Weekly: n(r.KeepWeekly), Monthly: n(r.KeepMonthly), Within: r.KeepWithin,
+			Index: i + 1, Tag: r.Tag, Last: n(r.KeepLast), Hourly: n(r.KeepHourly), Daily: n(r.KeepDaily),
+			Weekly: n(r.KeepWeekly), Monthly: n(r.KeepMonthly), Yearly: n(r.KeepYearly), Within: r.KeepWithin,
 		})
 	}
 	if len(rows) < restic.MaxTagRules {

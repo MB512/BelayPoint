@@ -322,7 +322,11 @@ paths. A policy without any rule is refused (restic would keep everything).
 Values are validated and passed as separate arguments.
 
 **Tag rules** give snapshots with a tag their own retention (up to 5 rules,
-each with keep last / daily / weekly / monthly / within). forget then runs in
+each with the same keep values as the policy). The page shows the policy as
+one table: a row per tag rule, an empty row to add one, and a last row
+*all other snapshots* with the main policy. Each rule row has a × button that
+saves the policy without that rule; a row with values but no tag is refused
+rather than dropped. forget then runs in
 passes: first one per rule (`forget --tag <tag>` with the rule's values),
 then the main policy over the snapshots *without* a rule tag only. restic
 has no "without tag" filter, and `--keep-tag` is no help: protected

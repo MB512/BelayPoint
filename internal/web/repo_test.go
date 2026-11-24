@@ -143,18 +143,23 @@ func TestTagRules(t *testing.T) {
 	cookie := login(t, e)
 	csrf := csrfFromPage(t, e.h, cookie)
 
-	// The default policy shows its pre-stop rule plus an empty row.
+	// The default policy shows its pre-stop rule (with ×), an empty row
+	// (without ×) and the row for all other snapshots.
 	body := getWithCookie(e.h, "/repos/view?repo=alice/main", cookie).Body.String()
-	for _, want := range []string{`name="tag_1" value="pre-stop"`, `name="tag_1_last" min="0" value="2"`, `name="tag_2" value=""`, "tag pre-stop: --keep-last 2"} {
+	for _, want := range []string{`name="tag_1" value="pre-stop"`, `name="tag_1_last" min="0" value="2"`, `name="tag_2" value=""`,
+		`name="remove_rule" value="1"`, "all other snapshots", `name="keep_daily" min="0" value="7"`, "tag pre-stop: --keep-last 2"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page lacks %s", want)
 		}
+	}
+	if strings.Contains(body, `name="remove_rule" value="2"`) {
+		t.Error("the empty row has a remove button")
 	}
 
 	v := url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "keep_daily": {"7"},
 		"tag_1": {"pre-stop"}, "tag_1_last": {"1"}, "tag_1_within": {"3d"},
 		"tag_2": {"pre-restore"}, "tag_2_weekly": {"2"},
-		"tag_3": {""}, "tag_3_last": {"5"}} // no tag: ignored
+		"tag_3": {""}, "tag_3_within": {" "}} // empty row: ignored
 	w := post(e.h, "/repos/forget-preview", cookie, v, nil)
 	body = w.Body.String()
 	if w.Code != http.StatusOK {
@@ -176,11 +181,35 @@ func TestTagRules(t *testing.T) {
 		t.Errorf("stored %+v", p)
 	}
 
+	// Hourly and yearly are offered for tag rules too.
+	v.Set("tag_2_hourly", "24")
+	v.Set("tag_2_yearly", "1")
+	wantRedirect(t, post(e.h, "/repos/policy", cookie, v, nil), "/repos/view?repo=alice%2Fmain")
+	p, _, _ = e.store.RepoPolicy(ctx, "alice/main")
+	if len(p.TagRules) != 2 || p.TagRules[1].KeepHourly != 24 || p.TagRules[1].KeepYearly != 1 {
+		t.Errorf("stored %+v", p)
+	}
+	body = getWithCookie(e.h, "/repos/view?repo=alice/main", cookie).Body.String()
+	for _, want := range []string{`name="tag_2_hourly" min="0" value="24"`, `name="tag_2_yearly" min="0" value="1"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page lacks %s", want)
+		}
+	}
+
+	// The × of row 1 saves the policy without that rule.
+	v.Set("remove_rule", "1")
+	wantRedirect(t, post(e.h, "/repos/policy", cookie, v, nil), "/repos/view?repo=alice%2Fmain")
+	p, _, _ = e.store.RepoPolicy(ctx, "alice/main")
+	if len(p.TagRules) != 1 || p.TagRules[0].Tag != "pre-restore" || p.KeepDaily != 7 {
+		t.Errorf("after removing rule 1: %+v", p)
+	}
+
 	for name, bad := range map[string]url.Values{
-		"rule without keep": {"tag_1": {"pre-stop"}},
-		"tag list":          {"tag_1": {"a,b"}, "tag_1_last": {"1"}},
-		"twice":             {"tag_1": {"x"}, "tag_1_last": {"1"}, "tag_2": {"x"}, "tag_2_last": {"1"}},
-		"bad number":        {"tag_1": {"x"}, "tag_1_last": {"one"}},
+		"values without tag": {"tag_1": {""}, "tag_1_last": {"5"}},
+		"rule without keep":  {"tag_1": {"pre-stop"}},
+		"tag list":           {"tag_1": {"a,b"}, "tag_1_last": {"1"}},
+		"twice":              {"tag_1": {"x"}, "tag_1_last": {"1"}, "tag_2": {"x"}, "tag_2_last": {"1"}},
+		"bad number":         {"tag_1": {"x"}, "tag_1_last": {"one"}},
 	} {
 		bad.Set("csrf_token", csrf)
 		bad.Set("repo", "alice/main")
