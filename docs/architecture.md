@@ -402,7 +402,7 @@ policy's rows: they are kept for a different reason. Inside a section, one
 row per host+paths group (hosts as sub-headings, the common path prefix
 left out), groups that lose snapshots first; unchanged groups are collapsed.
 Each row is a timeline: kept snapshots as filled dots drawn over removed
-ones as red rings. The time axis is split into bands derived from the
+ones as red rings, newest on the left. The time axis is split into bands derived from the
 pass's rules (keep-within, then hourly … yearly, each covering only what
 reaches further back than the finer rules, plus "older"), each band as wide
 as its number of slots, so recent days are not squashed by years of

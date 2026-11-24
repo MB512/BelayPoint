@@ -16,12 +16,12 @@ func TestAxisBands(t *testing.T) {
 		name   string
 		keep   restic.Keep
 		oldest time.Time
-		want   string // labels, oldest first
+		want   string // labels, newest (left) first
 	}{
 		{"production policy", restic.Keep{KeepWithin: "7d", KeepDaily: 30, KeepWeekly: 10, KeepMonthly: 24, KeepYearly: 6},
-			now.AddDate(-8, 0, 0), "older|yearly (6)|monthly (24)|weekly (10)|daily (30)|within 7d"},
+			now.AddDate(-8, 0, 0), "within 7d|daily (30)|weekly (10)|monthly (24)|yearly (6)|older"},
 		{"no older band when everything is within reach", restic.Keep{KeepDaily: 7, KeepWeekly: 4},
-			now.AddDate(0, 0, -20), "weekly (4)|daily (7)"},
+			now.AddDate(0, 0, -20), "daily (7)|weekly (4)"},
 		{"a rule reaching no further adds no band", restic.Keep{KeepDaily: 30, KeepWeekly: 4},
 			now.AddDate(0, 0, -10), "daily (30)"},
 		{"keep-last only: plain time", restic.Keep{KeepLast: 2},
@@ -48,17 +48,18 @@ func TestAxisBands(t *testing.T) {
 func TestPosition(t *testing.T) {
 	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 	bands := axisBands(restic.Keep{KeepDaily: 10, KeepWeekly: 10}, now, now.AddDate(0, 0, -70))
-	// weekly (10) takes the left half, daily (10) the right half.
+	// daily (10) takes the left half, weekly (10) the right half; now is
+	// at the left.
 	for _, c := range []struct {
 		t    time.Time
 		want float64
 	}{
-		{now, 99.4},                  // newest: right end (minus the margin)
-		{now.AddDate(0, 0, -5), 75},  // middle of daily
-		{now.AddDate(0, 0, -10), 50}, // border
-		{now.AddDate(0, 0, -40), 25}, // middle of weekly
-		{now.AddDate(-1, 0, 0), 0.6}, // before the axis: clamped
-		{now.Add(time.Hour), 99.4},   // clock skew: clamped
+		{now, 0.6},                    // newest: left end (plus the margin)
+		{now.AddDate(0, 0, -5), 25},   // middle of daily
+		{now.AddDate(0, 0, -10), 50},  // border
+		{now.AddDate(0, 0, -40), 75},  // middle of weekly
+		{now.AddDate(-1, 0, 0), 99.4}, // before the axis: clamped
+		{now.Add(time.Hour), 0.6},     // clock skew: clamped
 	} {
 		if got := position(bands, c.t); got < c.want-0.5 || got > c.want+0.5 {
 			t.Errorf("%v: %v, want %v", c.t, got, c.want)

@@ -233,7 +233,8 @@ const (
 	olderBandWeight = 4
 )
 
-// axisBands splits the time axis by the keep rules, oldest band left. Each
+// axisBands splits the time axis by the keep rules, newest band left (in
+// the order the rules read: within, daily, weekly, …). Each
 // rule covers the time from where the shorter rules end back to its own
 // reach (daily 30: the last 30 days); a rule that reaches no further than
 // a shorter one adds no band. Snapshots beyond the longest reach fall into
@@ -292,7 +293,6 @@ func axisBands(k restic.Keep, now, oldest time.Time) []band {
 		if oldest.Before(end) {
 			bands = append(bands, band{Label: "older", Title: "older than all keep rules reach", start: oldest, end: end, w: olderBandWeight})
 		}
-		slices.Reverse(bands)
 	}
 	var total float64
 	for _, b := range bands {
@@ -312,8 +312,8 @@ func unit(rule string) string {
 	return map[string]string{"hourly": "hours", "daily": "days", "weekly": "weeks", "monthly": "months", "yearly": "years"}[rule]
 }
 
-// position is the x coordinate (percent) of time t on the axis; times
-// outside it are clamped to its ends.
+// position is the x coordinate (percent) of time t on the axis, now at the
+// left; times outside it are clamped to its ends.
 func position(bands []band, t time.Time) float64 {
 	if len(bands) == 0 {
 		return 0
@@ -321,18 +321,18 @@ func position(bands []band, t time.Time) float64 {
 	// A small margin keeps dots at the ends fully visible.
 	const margin = 0.6
 	clamp := func(v float64) float64 { return min(max(v, margin), 100-margin) }
-	if !t.After(bands[0].start) {
-		return clamp(0)
+	if !t.Before(bands[0].end) {
+		return clamp(0) // now, or newer (clock skew)
 	}
 	for _, b := range bands {
-		if t.After(b.end) {
+		if t.Before(b.start) {
 			continue
 		}
 		span := b.end.Sub(b.start)
 		if span <= 0 {
 			return clamp(b.x + b.w/2)
 		}
-		return clamp(b.x + b.w*float64(t.Sub(b.start))/float64(span))
+		return clamp(b.x + b.w*float64(b.end.Sub(t))/float64(span))
 	}
 	return clamp(100)
 }
