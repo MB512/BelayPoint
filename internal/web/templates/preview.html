@@ -1,0 +1,20 @@
+{{/* The passes of a forget dry-run (previewData), shared by the Retention
+tab and the forget confirmation page. */}}
+{{define "passes"}}
+{{range .Passes}}
+<h3>{{if .Tag}}Tag <code>{{.Tag}}</code>{{else}}All other snapshots{{end}}: {{.Remove}} removed, {{.Keep}} kept</h3>
+{{range .Groups}}
+<h4><code>{{.Host}}</code> {{.Paths}}</h4>
+<p>{{len .Keep}} kept, {{len .Remove}} removed.</p>
+{{if .Remove}}<details open><summary>Removed</summary>
+<table><thead><tr><th>Snapshot</th><th>Time</th><th>Tags</th></tr></thead><tbody>
+{{range .Remove}}<tr><td><code>{{.ID}}</code></td><td class="nowrap">{{.Time}}</td><td>{{.Tags}}</td></tr>{{end}}
+</tbody></table></details>{{end}}
+<details><summary>Kept</summary>
+<table><thead><tr><th>Snapshot</th><th>Time</th><th>Tags</th></tr></thead><tbody>
+{{range .Keep}}<tr><td><code>{{.ID}}</code></td><td class="nowrap">{{.Time}}</td><td>{{.Tags}}</td></tr>{{end}}
+</tbody></table></details>
+{{else}}<p class="muted">No snapshots.</p>
+{{end}}
+{{end}}
+{{end}}

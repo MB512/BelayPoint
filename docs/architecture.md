@@ -368,8 +368,11 @@ and whether the policy is the default stay above the tabs.
 The Run now tab has one block per action: "Unlock" (stale locks; "Remove all
 locks…" leads to the typed confirmation of `unlock --remove-all`),
 "Forget…", "Prune…" and "Check". It needs the repository password. forget and
-prune open a confirmation page (forget shows the saved policy) and need a
-ticked checkbox; check runs directly. forget uses the saved policy (or the
+prune open a confirmation page and need a ticked checkbox; check runs
+directly. The forget confirmation page runs the dry-run with the saved policy
+(like "Preview these values") and shows what would be removed; if the dry-run
+fails, it offers no confirmation, so nobody confirms a forget without seeing
+its effect. forget uses the saved policy (or the
 default), logs every removed snapshot and updates the cached snapshot summary
 from restic's result. prune uses `--max-unused 5%`. A check started by hand
 verifies the structure only, or with "read part n of t" also that data

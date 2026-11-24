@@ -339,6 +339,10 @@ type maintenanceData struct {
 	Job    string
 	Policy string // forget: the saved policy as restic arguments
 	Custom bool
+	// forget: the dry-run with the saved policy. Without a preview
+	// (PreviewErr set) the page offers no confirmation.
+	Preview    *previewData
+	PreviewErr string
 }
 
 func (s *server) maintenancePage(w http.ResponseWriter, r *http.Request) {
@@ -356,10 +360,30 @@ func (s *server) maintenancePage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.Policy, d.Custom = p.String(), custom
+		d.Preview, d.PreviewErr = s.forgetDryRun(r.Context(), path, p)
 	}
 	s.render(w, http.StatusOK, "maintenance.html", page{
 		Title: string(typ) + " " + path, CSRF: sessionFrom(r.Context()).CSRF, Maintenance: d,
 	})
+}
+
+// forgetDryRun runs forget --dry-run with the saved policy for the
+// confirmation page, so nobody confirms a forget without seeing what it
+// removes. On failure it returns the message to show instead.
+func (s *server) forgetDryRun(ctx context.Context, path string, p restic.Policy) (*previewData, string) {
+	if s.Jobs == nil {
+		return nil, "restic is not available; see the container log."
+	}
+	ctx, cancel := context.WithTimeout(ctx, PreviewTimeout)
+	defer cancel()
+	results, err := s.Jobs.PreviewForget(ctx, path, p)
+	if err != nil {
+		if !errors.Is(err, jobs.ErrSealed) && !errors.Is(err, jobs.ErrNoPassword) {
+			s.Logger.Warn("forget preview", "repo", path, "err", err)
+		}
+		return nil, "The preview (dry-run) failed: " + err.Error()
+	}
+	return s.preview(results), ""
 }
 
 // startMaintenance queues forget, prune (both confirmed) or check (with an

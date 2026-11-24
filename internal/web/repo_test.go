@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -112,9 +113,27 @@ func TestMaintenance(t *testing.T) {
 	cookie := login(t, e)
 	csrf := csrfFromPage(t, e.h, cookie)
 
+	// The forget confirmation page shows the dry-run of the saved policy.
 	w := getWithCookie(e.h, "/repos/maintenance?repo=alice/main&job=forget", cookie)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "--keep-daily 7") {
-		t.Errorf("forget confirm page: %d", w.Code)
+	body := w.Body.String()
+	for _, want := range []string{"--keep-daily 7", "Preview (dry-run)", "3 of 4 snapshots would be removed", "gone0002", `name="confirm"`} {
+		if w.Code != http.StatusOK || !strings.Contains(body, want) {
+			t.Errorf("forget confirm page (%d) lacks %q", w.Code, want)
+		}
+	}
+	if len(e.jobs.previews) != 1 || !strings.HasPrefix(e.jobs.previews[0], "alice/main --keep-daily 7") {
+		t.Errorf("previews %v", e.jobs.previews)
+	}
+	// Without a preview there is nothing to confirm.
+	e.jobs.err = errors.New("repository is already locked")
+	body = getWithCookie(e.h, "/repos/maintenance?repo=alice/main&job=forget", cookie).Body.String()
+	if !strings.Contains(body, "The preview (dry-run) failed: repository is already locked") || strings.Contains(body, `name="confirm"`) {
+		t.Error("failed preview still offers the confirmation")
+	}
+	e.jobs.err = nil
+	// prune needs no preview.
+	if body := getWithCookie(e.h, "/repos/maintenance?repo=alice/main&job=prune", cookie).Body.String(); !strings.Contains(body, `name="confirm"`) || len(e.jobs.previews) != 1 {
+		t.Errorf("prune confirm page: previews %v", e.jobs.previews)
 	}
 	for _, bad := range []string{"job=check", "job=unlock-all", "job=x", "job=forget&repo=../x"} {
 		if w := getWithCookie(e.h, "/repos/maintenance?repo=alice/main&"+bad, cookie); w.Code != http.StatusNotFound && !strings.Contains(bad, "repo=") {

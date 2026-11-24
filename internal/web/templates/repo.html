@@ -29,7 +29,8 @@ Policy: {{if .Custom}}own{{else}}default{{end}}.</p>
 <section class="action">
 <h3>Forget snapshots</h3>
 <p class="muted">Removes the snapshots that the <a href="/repos/view?repo={{.Path}}&amp;tab=retention">retention policy</a> does not keep.
-They cannot be restored afterwards.</p>
+They cannot be restored afterwards. The next page shows a preview (dry-run) of what would be removed before
+anything happens.</p>
 <div class="buttons"><a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=forget">Forget…</a></div>
 </section>
 
@@ -139,22 +140,7 @@ Within takes a duration such as <code>14d</code>, <code>6m</code> or <code>1y6m<
 {{if .Unsaved}}<p class="warn">These values are not saved. Save the policy to use them for forget and the schedule.</p>{{end}}
 <p>With {{if .Unsaved}}these values{{else}}this policy{{end}}, <strong>{{.Remove}} of {{add .Keep .Remove}} snapshots would be removed</strong> and {{.Keep}} kept.
 Nothing has been changed. The space is only freed by a later prune.</p>
-{{range .Passes}}
-<h3>{{if .Tag}}Tag <code>{{.Tag}}</code>{{else}}All other snapshots{{end}}: {{.Remove}} removed, {{.Keep}} kept</h3>
-{{range .Groups}}
-<h4><code>{{.Host}}</code> {{.Paths}}</h4>
-<p>{{len .Keep}} kept, {{len .Remove}} removed.</p>
-{{if .Remove}}<details open><summary>Removed</summary>
-<table><thead><tr><th>Snapshot</th><th>Time</th><th>Tags</th></tr></thead><tbody>
-{{range .Remove}}<tr><td><code>{{.ID}}</code></td><td class="nowrap">{{.Time}}</td><td>{{.Tags}}</td></tr>{{end}}
-</tbody></table></details>{{end}}
-<details><summary>Kept</summary>
-<table><thead><tr><th>Snapshot</th><th>Time</th><th>Tags</th></tr></thead><tbody>
-{{range .Keep}}<tr><td><code>{{.ID}}</code></td><td class="nowrap">{{.Time}}</td><td>{{.Tags}}</td></tr>{{end}}
-</tbody></table></details>
-{{else}}<p class="muted">No snapshots.</p>
-{{end}}
-{{end}}
+{{template "passes" .}}
 {{end}}
 {{end}}
 {{end}}
