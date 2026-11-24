@@ -455,6 +455,11 @@ func TestRealForgetPreview(t *testing.T) {
 	if len(res) != 1 || len(res[0].Groups) != 1 || len(Kept(res)) != 1 || Removed(res) != 2 || res[0].Groups[0].Host == "" {
 		t.Fatalf("result = %+v", res)
 	}
+	// restic says why it keeps the snapshot.
+	g := res[0].Groups[0]
+	if why := g.ReasonFor(g.Keep[0].ID); len(why) != 1 || why[0] != "last snapshot" {
+		t.Errorf("reason %q", why)
+	}
 	// Dry run: all three are still there, and no lock was left.
 	if list, _ := c.Snapshots(ctx, dir, pw); len(list) != 3 {
 		t.Errorf("%d snapshots after the preview", len(list))

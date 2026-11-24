@@ -237,6 +237,28 @@ type ForgetGroup struct {
 	Paths  []string   `json:"paths"`
 	Keep   []Snapshot `json:"keep"`
 	Remove []Snapshot `json:"remove"`
+	// Reasons says per kept snapshot which rules keep it, e.g. "within
+	// 7d", "daily snapshot", "weekly snapshot".
+	Reasons []KeepReason `json:"reasons"`
+}
+
+// KeepReason is one entry of restic's "reasons" list.
+type KeepReason struct {
+	Snapshot struct {
+		ID string `json:"id"`
+	} `json:"snapshot"`
+	Matches []string `json:"matches"`
+}
+
+// ReasonFor returns the rules that keep the snapshot with this id (nil if
+// restic gave none).
+func (g ForgetGroup) ReasonFor(id string) []string {
+	for _, r := range g.Reasons {
+		if r.Snapshot.ID == id {
+			return r.Matches
+		}
+	}
+	return nil
 }
 
 // PassResult is the outcome of one pass.
