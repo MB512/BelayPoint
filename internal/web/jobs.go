@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -32,6 +31,7 @@ type Jobs interface {
 // JobList reads the job history (implemented by *store.Store).
 type JobList interface {
 	ListJobs(ctx context.Context, limit int, before int64) ([]store.Job, error)
+	Job(ctx context.Context, id int64) (store.Job, error)
 }
 
 const jobsPageSize = 100
@@ -48,6 +48,17 @@ type jobRow struct {
 	Error    string
 }
 
+func (s *server) jobRow(j store.Job) jobRow {
+	row := jobRow{
+		ID: j.ID, Repo: j.Repo, Type: j.Type, Trigger: j.Trigger, State: j.State,
+		Queued: j.Queued.In(s.Location).Format("2006-01-02 15:04:05"), Summary: j.Summary, Error: j.Error,
+	}
+	if !j.Started.IsZero() && !j.Finished.IsZero() {
+		row.Duration = j.Finished.Sub(j.Started).Round(time.Second).String()
+	}
+	return row
+}
+
 func (s *server) jobsPage(w http.ResponseWriter, r *http.Request) {
 	before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
 	list, err := s.JobList.ListJobs(r.Context(), jobsPageSize, before)
@@ -58,14 +69,7 @@ func (s *server) jobsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	p := page{Title: "Jobs", CSRF: sessionFrom(r.Context()).CSRF}
 	for _, j := range list {
-		row := jobRow{
-			ID: j.ID, Repo: j.Repo, Type: j.Type, Trigger: j.Trigger, State: j.State,
-			Queued: j.Queued.In(s.Location).Format("2006-01-02 15:04:05"), Summary: j.Summary, Error: j.Error,
-		}
-		if !j.Started.IsZero() && !j.Finished.IsZero() {
-			row.Duration = j.Finished.Sub(j.Started).Round(time.Second).String()
-		}
-		p.Jobs = append(p.Jobs, row)
+		p.Jobs = append(p.Jobs, s.jobRow(j))
 	}
 	if len(list) == jobsPageSize {
 		p.NextBefore = list[len(list)-1].ID
@@ -114,9 +118,9 @@ func (s *server) refreshSnapshots(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, "/")
 }
 
-// submitJob queues one job for a known repository and audits it. toRepo
-// (the job was started on the repository page) returns to its Run now tab,
-// otherwise to the overview; errors are shown there too.
+// submitJob queues one job for a known repository, audits it and shows
+// the job's log page. Errors are shown on the page the job was started
+// from: the repository page (toRepo) or the overview.
 func (s *server) submitJob(w http.ResponseWriter, r *http.Request, path string, typ jobs.Type, toRepo bool) {
 	if s.Jobs == nil {
 		s.jobFailed(w, r, path, toRepo, http.StatusServiceUnavailable, "restic is not available; see the container log.")
@@ -132,17 +136,13 @@ func (s *server) submitJob(w http.ResponseWriter, r *http.Request, path string, 
 		return
 	}
 	s.Audit.Audit(r.Context(), "job submitted", fmt.Sprintf("%s, %s, job %d, %s", typ, path, id, remote(r)))
-	s.jobSubmitted(w, r, path, id, toRepo)
-}
-
-// jobSubmitted redirects after a job was queued: to the Run now tab with
-// the job id (shown as "Job n was queued"), or to the overview.
-func (s *server) jobSubmitted(w http.ResponseWriter, r *http.Request, path string, id int64, toRepo bool) {
-	if !toRepo {
-		redirect(w, r, "/")
+	if typ == jobs.Snapshots {
+		redirect(w, r, "/") // a background refresh, shown in the overview
 		return
 	}
-	redirect(w, r, "/repos/view?repo="+url.QueryEscape(path)+"&tab="+tabRun+"&job="+strconv.FormatInt(id, 10))
+	// Starting a job by hand leads to its log page, so the result shows up
+	// without searching for it.
+	redirect(w, r, "/jobs/"+strconv.FormatInt(id, 10)+"/log")
 }
 
 // jobFailed shows why a job was not queued, on the page it came from.
@@ -195,7 +195,7 @@ func (s *server) submitCheck(w http.ResponseWriter, r *http.Request, f form) {
 		details += " (data subset " + subset + ")"
 	}
 	s.Audit.Audit(r.Context(), "job submitted", fmt.Sprintf("%s, %s, job %d, %s", details, path, id, remote(r)))
-	s.jobSubmitted(w, r, path, id, true)
+	redirect(w, r, "/jobs/"+strconv.FormatInt(id, 10)+"/log")
 }
 
 // unlock removes stale locks (restic decides what is stale).
@@ -251,18 +251,34 @@ func (s *server) jobLog(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	text, truncated, err := readTail(jobs.LogPath(s.JobLogDir, id), maxLogBytes)
-	if errors.Is(err, fs.ErrNotExist) {
+	text, truncated, readErr := readTail(jobs.LogPath(s.JobLogDir, id), maxLogBytes)
+	if errors.Is(readErr, fs.ErrNotExist) {
 		text = "(no log: the job did not start, or its log was removed after the retention period)"
-	} else if err != nil {
-		s.Logger.Error("reading job log", "job", id, "err", err)
+	} else if readErr != nil {
+		s.Logger.Error("reading job log", "job", id, "err", readErr)
 		http.Error(w, "reading the log failed; see the container log", http.StatusInternalServerError)
 		return
 	}
-	s.render(w, http.StatusOK, "job-log.html", page{
-		Title: fmt.Sprintf("Job %d", id), CSRF: sessionFrom(r.Context()).CSRF,
-		Log: &logData{Text: text, Truncated: truncated},
-	})
+	d := &logData{Text: text, Truncated: truncated}
+	p := page{Title: fmt.Sprintf("Job %d", id), CSRF: sessionFrom(r.Context()).CSRF, Log: d}
+	// The job's record adds state and result; a log without record (job
+	// history cleaned up) is still shown.
+	j, err := s.JobList.Job(r.Context(), id)
+	switch {
+	case err == nil:
+		row := s.jobRow(j)
+		d.Job = &row
+		if j.State == jobs.StateQueued || j.State == jobs.StateRunning {
+			d.Active = true
+			p.Refresh = logRefreshSeconds
+			if j.State == jobs.StateQueued && errors.Is(readErr, fs.ErrNotExist) {
+				d.Text = "(waiting in the queue)"
+			}
+		}
+	case !errors.Is(err, store.ErrNotFound):
+		s.Logger.Error("reading job", "job", id, "err", err)
+	}
+	s.render(w, http.StatusOK, "job-log.html", p)
 }
 
 const maxLogBytes = 1 << 20
@@ -270,7 +286,14 @@ const maxLogBytes = 1 << 20
 type logData struct {
 	Text      string
 	Truncated bool
+	Job       *jobRow // nil without a job record
+	// Active: queued or running; the page reloads itself.
+	Active bool
 }
+
+// logRefreshSeconds is the reload interval of the log page of an active
+// job (<meta http-equiv="refresh">: no JavaScript needed).
+const logRefreshSeconds = 2
 
 // readTail reads at most limit bytes from the end of the file.
 func readTail(path string, limit int64) (string, bool, error) {

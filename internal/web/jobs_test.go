@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -108,7 +109,7 @@ func TestUnlock(t *testing.T) {
 	cookie := login(t, e)
 	csrf := csrfFromPage(t, e.h, cookie)
 
-	wantRedirect(t, post(e.h, "/repos/unlock", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}}, nil), "/")
+	wantRedirect(t, post(e.h, "/repos/unlock", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}}, nil), "/jobs/1/log")
 	if w := post(e.h, "/repos/unlock", cookie, url.Values{"csrf_token": {csrf}, "repo": {"../x"}}, nil); w.Code != http.StatusNotFound {
 		t.Errorf("unknown repository: %d", w.Code)
 	}
@@ -121,19 +122,23 @@ func TestUnlock(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("wrong name: %d", w.Code)
 	}
-	wantRedirect(t, post(e.h, "/repos/unlock-all", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "confirm_name": {"alice/main"}}, nil), "/")
+	wantRedirect(t, post(e.h, "/repos/unlock-all", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "confirm_name": {"alice/main"}}, nil), "/jobs/2/log")
 	if !slices.Equal(e.jobs.submitted, []string{"unlock alice/main", "unlock-all alice/main"}) || !e.audit.has("job submitted") {
 		t.Errorf("submitted %v", e.jobs.submitted)
 	}
 
-	// Started on the repository page (from=repo), both return there.
-	back := "/repos/view?repo=alice%2Fmain&tab=run&job="
-	wantRedirect(t, post(e.h, "/repos/unlock", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "from": {"repo"}}, nil), back+"3")
+	// Started on the repository page (from=repo): errors are shown there,
+	// and the unlock-all page returns there on cancel.
+	e.jobs.err = jobs.ErrBusy
+	if body := post(e.h, "/repos/unlock", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "from": {"repo"}}, nil).Body.String(); !strings.Contains(body, `tab=run" aria-current="page"`) || !strings.Contains(body, "already queued or running") {
+		t.Error("refused unlock not shown on the repository page")
+	}
+	e.jobs.err = nil
 	body := getWithCookie(e.h, "/repos/unlock-all?repo=alice/main&from=repo", cookie).Body.String()
 	if !strings.Contains(body, `name="from" value="repo"`) || !strings.Contains(body, `href="/repos/view?repo=alice%2fmain">Cancel`) {
 		t.Error("unlock-all page from the repository page does not return there")
 	}
-	wantRedirect(t, post(e.h, "/repos/unlock-all", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "confirm_name": {"alice/main"}, "from": {"repo"}}, nil), back+"4")
+	wantRedirect(t, post(e.h, "/repos/unlock-all", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "confirm_name": {"alice/main"}, "from": {"repo"}}, nil), "/jobs/3/log")
 }
 
 func TestJobLogPage(t *testing.T) {
@@ -146,6 +151,29 @@ func TestJobLogPage(t *testing.T) {
 	}
 	if w := getWithCookie(e.h, "/jobs/8/log", cookie); !strings.Contains(w.Body.String(), "no log") {
 		t.Error("missing log not explained")
+	}
+
+	// With a job record: state and result; while queued or running the
+	// page reloads itself.
+	ctx := context.Background()
+	t0 := time.Date(2026, 11, 24, 15, 0, 0, 0, time.UTC)
+	queued, _ := e.store.AddJob(ctx, "alice/main", "prune", "manual", t0)
+	body := getWithCookie(e.h, fmt.Sprintf("/jobs/%d/log", queued), cookie).Body.String()
+	for _, want := range []string{`<meta http-equiv="refresh" content="2">`, ">queued<", "(waiting in the queue)", "<strong>prune</strong>", "Back to the repository"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("queued job page lacks %q", want)
+		}
+	}
+	_ = e.store.StartJob(ctx, queued, t0.Add(time.Second))
+	_ = e.store.FinishJob(ctx, queued, jobs.StateFailed, "", "disk full", t0.Add(3*time.Second))
+	body = getWithCookie(e.h, fmt.Sprintf("/jobs/%d/log", queued), cookie).Body.String()
+	for _, want := range []string{">failed<", "disk full", "after 2s"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("finished job page lacks %q", want)
+		}
+	}
+	if strings.Contains(body, "http-equiv") {
+		t.Error("finished job page still reloads")
 	}
 	for _, bad := range []string{"/jobs/abc/log", "/jobs/-1/log", "/jobs/..%2f..%2fetc/log"} {
 		if w := getWithCookie(e.h, bad, cookie); w.Code != http.StatusNotFound {

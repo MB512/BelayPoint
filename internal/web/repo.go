@@ -36,9 +36,6 @@ type repoData struct {
 	Default     restic.Policy
 	// Tab is the visible tab: tabRun, tabRetention or tabSchedule.
 	Tab string
-	// Submitted is the id of the job just queued from the Run now tab
-	// (query parameter job), 0 for none.
-	Submitted int64
 	// Preview is set after "Preview these values".
 	Preview *previewData
 	Plan    *planData
@@ -99,9 +96,6 @@ func (s *server) repoPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.Tab = repoTab(r.URL.Query().Get("tab"))
-	if id, err := strconv.ParseInt(r.URL.Query().Get("job"), 10, 64); err == nil && id > 0 {
-		d.Submitted = id
-	}
 	s.renderRepo(w, r, http.StatusOK, d, "")
 }
 

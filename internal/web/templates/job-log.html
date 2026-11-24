@@ -1,7 +1,16 @@
 {{template "top" .}}
 {{with .Log}}
+{{with .Job}}
+<p><strong>{{.Type}}</strong> of <a href="/repos/view?repo={{.Repo}}"><code>{{.Repo}}</code></a>{{if eq .Trigger "schedule"}} <span class="badge">scheduled</span>{{end}},
+queued {{.Queued}}:
+<span class="badge{{if or (eq .State "failed") (eq .State "refused") (eq .State "interrupted") (eq .State "skipped")}} bad{{end}}">{{.State}}</span>
+{{if .Duration}}after {{.Duration}}{{end}}</p>
+{{if .Summary}}<p class="notice">{{.Summary}}</p>{{end}}
+{{if .Error}}<p class="error"><code class="errtext">{{.Error}}</code></p>{{end}}
+{{end}}
+{{if .Active}}<p class="muted">The page reloads every few seconds until the job has finished.</p>{{end}}
 {{if .Truncated}}<p class="muted">Only the end of the log is shown.</p>{{end}}
 <pre class="log">{{.Text}}</pre>
+<p>{{with .Job}}<a href="/repos/view?repo={{.Repo}}">Back to the repository</a> · {{end}}<a href="/jobs">All jobs</a></p>
 {{end}}
-<p><a href="/jobs">Back to the jobs</a></p>
 {{template "bottom" .}}

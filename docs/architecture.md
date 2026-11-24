@@ -367,15 +367,15 @@ and whether the policy is the default stay above the tabs.
 
 The Run now tab has one block per action: "Unlock" (stale locks; "Remove all
 locks…" leads to the typed confirmation of `unlock --remove-all`),
-"Forget…", "Prune…" and "Check". It needs the repository password. After a
-job was queued (or refused) the browser returns to the Run now tab, which
-names the queued job and links its log; jobs started on the overview return
-to the overview. forget and
-prune open a confirmation page and need a ticked checkbox; check runs
-directly. The forget confirmation page runs the dry-run with the saved policy
-(like "Preview these values") and shows what would be removed; if the dry-run
-fails, it offers no confirmation, so nobody confirms a forget without seeing
-its effect. forget uses the saved policy (or the
+"Forget…", "Prune…" and "Check". It needs the repository password. A job
+started by hand (here or "Remove stale" on the overview) leads straight to
+its log page; a refused job is reported on the page it was started from.
+forget and prune open a confirmation page; check runs directly. The forget
+confirmation page runs the dry-run with the saved policy (like "Preview these
+values") and shows what would be removed; "Run forget" below it is the
+confirmation. If the dry-run fails, the page offers no confirmation, so
+nobody runs a forget without seeing its effect. prune needs a ticked
+checkbox. forget uses the saved policy (or the
 default), logs every removed snapshot and updates the cached snapshot summary
 from restic's result. prune uses `--max-unused 5%`. A check started by hand
 verifies the structure only, or with "read part n of t" also that data
@@ -426,7 +426,10 @@ recorded as a job with state `skipped` and the reason.
   password), the secrets are not available for the next job.
 - restic's output goes to `/config/jobs/<id>.log` (mode 0600), with the
   repository password replaced by `[redacted]` should restic ever print it.
-  The "Jobs" page links each job to its log. Logs older than
+  The "Jobs" page links each job to its log. The log page shows the job's
+  state and result above the log and reloads itself every 2 seconds
+  (`<meta http-equiv="refresh">`, no JavaScript) while the job is queued or
+  running. Logs older than
   `BELAYPOINT_JOB_LOG_RETENTION` are removed at startup and daily.
 - Locks: the overview offers "Remove stale" (`unlock`: restic removes locks
   whose process is gone on the same host, or that were not refreshed for 30

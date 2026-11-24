@@ -12,8 +12,6 @@ Policy: {{if .Custom}}own{{else}}default{{end}}.</p>
 </nav>
 
 {{if eq .Tab "run"}}
-{{with .Submitted}}<p class="notice">Job {{.}} was queued. Its result is on the <a href="/jobs">Jobs</a> page
-(<a href="/jobs/{{.}}/log">log</a>).</p>{{end}}
 {{if not $.JobsAvailable}}<p class="error">restic is not available; see the container log.</p>
 {{else if not .Password}}<p>Set the <a href="/repos/password?repo={{.Path}}">repository password</a> first: BelayPoint needs it to run restic.</p>
 {{else}}

@@ -190,8 +190,10 @@ func (s *server) caCert(w http.ResponseWriter, r *http.Request) {
 
 // page is the data of every template.
 type page struct {
-	Title         string
-	Version       string
+	Title   string
+	Version string
+	// Refresh > 0 reloads the page after that many seconds.
+	Refresh       int
 	HasCA         bool
 	CAFingerprint string
 	// CSRF is set on pages behind the login; forms put it in a hidden
