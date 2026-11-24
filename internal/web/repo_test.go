@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MB512/belaypoint/internal/jobs"
 	"github.com/MB512/belaypoint/internal/restic"
@@ -330,8 +333,8 @@ func TestArchiveFlag(t *testing.T) {
 		return post(e.h, "/repos/archive", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "archived": {v}, "tab": {tab}}, nil)
 	}
 	wantRedirect(t, set("yes", "schedule"), "/repos/view?repo=alice%2Fmain&tab=schedule")
-	if a, _ := e.store.RepoArchived(ctx, "alice/main"); !a || !e.audit.has("repository marked as archive") {
-		t.Errorf("archived=%v, audited=%v", a, e.audit.has("repository marked as archive"))
+	if f, _ := e.store.RepoFlags(ctx, "alice/main"); !f.Archived || !e.audit.has("repository marked as archive") {
+		t.Errorf("archived=%v, audited=%v", f.Archived, e.audit.has("repository marked as archive"))
 	}
 	body = getWithCookie(e.h, "/repos/view?repo=alice/main", cookie).Body.String()
 	if !strings.Contains(body, "Closed repository") || !strings.Contains(body, `name="archived" value="no"`) {
@@ -341,7 +344,7 @@ func TestArchiveFlag(t *testing.T) {
 		t.Error("overview lacks the archive badge")
 	}
 	wantRedirect(t, set("no", "bogus"), "/repos/view?repo=alice%2Fmain&tab=run")
-	if a, _ := e.store.RepoArchived(ctx, "alice/main"); a {
+	if f, _ := e.store.RepoFlags(ctx, "alice/main"); f.Archived {
 		t.Error("not marked as active again")
 	}
 	if w := post(e.h, "/repos/archive", cookie, url.Values{"csrf_token": {csrf}, "repo": {"../x"}, "archived": {"yes"}}, nil); w.Code != http.StatusNotFound {
@@ -349,5 +352,64 @@ func TestArchiveFlag(t *testing.T) {
 	}
 	if w := post(e.h, "/repos/archive", cookie, url.Values{"repo": {"alice/main"}, "archived": {"yes"}}, nil); w.Code != http.StatusForbidden {
 		t.Errorf("without CSRF token: %d", w.Code)
+	}
+}
+
+// "Owner keeps the password": not reported as missing a password, snapshot
+// files read live, no maintenance tabs; storing a password clears it.
+func TestOwnerKey(t *testing.T) {
+	e := newEnv(t, nil, true)
+	ctx := context.Background()
+	dir := makeRepo(t, e.reposDir, "dad/pc")
+	_ = e.store.SyncRepos(ctx, []string{"dad/pc"})
+	cookie := login(t, e)
+	csrf := csrfFromPage(t, e.h, cookie)
+
+	// Without the mark: reported for the missing password.
+	if body := getWithCookie(e.h, "/", cookie).Body.String(); !strings.Contains(body, "no password stored") {
+		t.Fatal("missing password not reported")
+	}
+	if body := getWithCookie(e.h, "/repos/view?repo=dad/pc", cookie).Body.String(); !strings.Contains(body, `name="ownerkey" value="yes"`) {
+		t.Fatal("no button to mark the repository")
+	}
+	set := func(v string) *httptest.ResponseRecorder {
+		return post(e.h, "/repos/owner-key", cookie, url.Values{"csrf_token": {csrf}, "repo": {"dad/pc"}, "ownerkey": {v}}, nil)
+	}
+	wantRedirect(t, set("yes"), "/repos/view?repo=dad%2Fpc")
+	if f, _ := e.store.RepoFlags(ctx, "dad/pc"); !f.OwnerKey || !e.audit.has("repository marked: owner keeps the password") {
+		t.Errorf("flags %+v", f)
+	}
+
+	// Two snapshot files, the newest 10 days old: last appended, and a
+	// hint to ask the owner.
+	for name, age := range map[string]time.Duration{"s1": 40 * 24 * time.Hour, "s2": 10 * 24 * time.Hour} {
+		p := filepath.Join(dir, "snapshots", name)
+		_ = os.WriteFile(p, []byte("x"), 0o600)
+		mt := time.Now().Add(-age)
+		_ = os.Chtimes(p, mt, mt)
+	}
+	body := getWithCookie(e.h, "/", cookie).Body.String()
+	for _, want := range []string{"owner's key", "managed by the owner", ">2<", ">10 days ago<", "no new snapshot (last one 10 days ago): ask the owner"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("overview lacks %q", want)
+		}
+	}
+	if strings.Contains(body, "no password stored") {
+		t.Error("still reported for the missing password")
+	}
+	page := getWithCookie(e.h, "/repos/view?repo=dad/pc", cookie).Body.String()
+	if !strings.Contains(page, "Password kept by the owner") || strings.Contains(page, `class="tabs"`) || !strings.Contains(page, "only grows") {
+		t.Error("repository page does not explain the mark, or still shows the tabs")
+	}
+
+	// A stored password clears the mark; with a password the mark is refused.
+	e.vault.secrets = []string{vault.RepoSecret("dad/pc")}
+	if w := set("yes"); w.Code != http.StatusConflict {
+		t.Errorf("mark with a stored password: %d", w.Code)
+	}
+	e.vault.secrets = nil
+	wantRedirect(t, set("no"), "/repos/view?repo=dad%2Fpc")
+	if f, _ := e.store.RepoFlags(ctx, "dad/pc"); f.OwnerKey {
+		t.Error("mark not removed")
 	}
 }

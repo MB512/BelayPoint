@@ -260,7 +260,8 @@ to rewrite packs.
 
 The overview (#7) answers "is everything OK, and where do I have to act?":
 
-- **Needs attention** lists, per repository: no password stored, the last
+- **Needs attention** lists, per repository: no password stored (unless
+  the owner keeps it), the last
   maintenance job (maintenance, forget, prune or check) failed, was refused,
   interrupted or skipped, a stale lock (older than 24 h) or unreadable lock
   files, an active repository whose newest snapshot is older than 7 days
@@ -406,6 +407,21 @@ expected, so an old last backup is not reported. The flag is a column of
 marked as archive" / "as active"), and shown as a badge on the overview.
 Maintenance is not affected: forget, prune and check run as configured.
 
+A repository without a stored password can be marked **"owner keeps the
+password"**: repositories of other people (relatives, friends) who do not
+share their password. It is then not reported as missing one, shown with an
+"owner's key" badge and "managed by the owner" instead of a maintenance
+status, and its page explains what BelayPoint can and cannot do instead of
+showing the tabs. Without the password BelayPoint reads the snapshot files
+live: each snapshot is one file, written once when the backup finished, so
+their count and the newest modification time show when the repository was
+last appended to (names and times are not encrypted). An active repository
+whose newest snapshot file is older than 7 days is listed under "Needs
+attention" with the hint to ask the owner. Such a repository only grows:
+the clients write append-only, so nobody can run forget or prune on it
+without the password. The flag (`repos.owner_key`) can only be set while no
+password is stored; storing a password clears it.
+
 ### Running maintenance by hand
 
 The Run now tab has one block per action: "Unlock" (stale locks; "Remove all
@@ -496,7 +512,7 @@ connections, so services like ntfy work.
 | Table | Content |
 |---|---|
 | `meta` | schema version |
-| `repos` | path (PK), discovered/missing, retention policy (JSON), schedule, step switches, `check_subset_n`, `check_subset_t`, cached snapshot count and newest snapshot, `archived` |
+| `repos` | path (PK), discovered/missing, retention policy (JSON), schedule, step switches, `check_subset_n`, `check_subset_t`, cached snapshot count and newest snapshot, `archived`, `owner_key` |
 | `jobs` | id, repo path, type, trigger (manual/schedule), state, started, finished, exit code, summary (JSON) |
 | `audit` | time, event, details (login, failed login, seal/unseal, user changes, job starts, settings changes) |
 

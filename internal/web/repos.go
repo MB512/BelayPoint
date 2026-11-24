@@ -47,6 +47,9 @@ type repoRow struct {
 	Busy bool
 	// Archived: closed repository, no new backups expected.
 	Archived bool
+	// OwnerKey: the owner keeps the password; the overview reads the
+	// snapshot files instead of restic's listing.
+	OwnerKey bool
 
 	// Overview columns. Name is the path without the user.
 	Name string
@@ -120,6 +123,7 @@ func (s *server) renderHome(w http.ResponseWriter, r *http.Request, status int, 
 			Missing:  repo.Missing,
 			Password: s.Vault.Has(vault.RepoSecret(repo.Path)),
 			Archived: repo.Archived,
+			OwnerKey: repo.OwnerKey,
 		}
 		row.Name = strings.TrimPrefix(repo.Path, row.Owner+"/")
 		if repo.Usage != nil {
@@ -136,6 +140,9 @@ func (s *server) renderHome(w http.ResponseWriter, r *http.Request, status int, 
 				row.LastBackupTitle = sn.Newest.In(s.Location).Format("2006-01-02 15:04")
 				row.StaleBackup = !repo.Archived && now.Sub(sn.Newest) > StaleBackupAge
 			}
+		}
+		if row.OwnerKey && !row.Password && !repo.Missing {
+			s.addSnapshotFiles(&row, now)
 		}
 		if j, ok := last[repo.Path]; ok {
 			row.LastJob = &lastJob{
@@ -228,6 +235,29 @@ func percent(part, whole int64) string {
 		return "< 1 %"
 	}
 	return fmt.Sprintf("%d %%", p)
+}
+
+// addSnapshotFiles fills the snapshot columns of a repository whose owner
+// keeps the password from its snapshot files (count and newest write time,
+// read live): without the password this is when it was last appended to.
+func (s *server) addSnapshotFiles(row *repoRow, now time.Time) {
+	dir, err := repos.Dir(s.ReposDir, row.Path)
+	if err != nil {
+		s.Logger.Warn("repository", "repo", row.Path, "err", err)
+		return
+	}
+	n, newest, err := repos.SnapshotFiles(dir)
+	if err != nil {
+		s.Logger.Warn("repository", "repo", row.Path, "err", err)
+		return
+	}
+	row.SnapshotCount = strconv.Itoa(n)
+	row.SnapshotsTitle = "snapshot files, read live"
+	if !newest.IsZero() {
+		row.LastBackup = humanAge(now, newest, s.Location)
+		row.LastBackupTitle = "newest snapshot file written " + newest.In(s.Location).Format("2006-01-02 15:04")
+		row.StaleBackup = !row.Archived && now.Sub(newest) > StaleBackupAge
+	}
 }
 
 // addLocks reads the lock files of the repository live (one directory
@@ -332,7 +362,8 @@ func problems(r repoRow) []attention {
 		return []attention{{r.Path, "no longer found below the repository root", "", ""}}
 	}
 	var out []attention
-	if !r.Password {
+	ownerKey := r.OwnerKey && !r.Password
+	if !r.Password && !r.OwnerKey {
 		out = append(out, attention{r.Path, "no password stored: nothing can run", "Set password", "/repos/password?repo=" + url.QueryEscape(r.Path)})
 	}
 	if j := r.LastJob; j != nil && !j.OK && !j.Active {
@@ -340,10 +371,14 @@ func problems(r repoRow) []attention {
 	}
 	if r.LockError {
 		out = append(out, attention{r.Path, "lock files cannot be read", "", ""})
+	} else if r.StaleLock && ownerKey {
+		out = append(out, attention{r.Path, "lock older than 24 h: probably stale; unlocking needs the password, ask the owner", "", ""})
 	} else if r.StaleLock {
 		out = append(out, attention{r.Path, "lock older than 24 h: probably stale", "Unlock", view + "&tab=run"})
 	}
-	if r.StaleBackup {
+	if r.StaleBackup && ownerKey {
+		out = append(out, attention{r.Path, "no new snapshot (last one " + r.LastBackup + "): ask the owner whether they still need it or need help", "Mark as archive?", view})
+	} else if r.StaleBackup {
 		out = append(out, attention{r.Path, "no recent backup (last one " + r.LastBackup + ")", "Mark as archive?", view})
 	}
 	return out

@@ -20,10 +20,12 @@
 {{range .Repos}}<tr{{if .Missing}} class="missing"{{end}}>
 <td>{{if .Missing}}<code>{{.Name}}</code> <span class="badge">missing</span>{{else}}<a href="/repos/view?repo={{.Path}}"><code>{{.Name}}</code></a>{{end}}
 {{if .Archived}}<span class="badge">archive</span>{{end}}
+{{if and .OwnerKey (not .Password)}}<span class="badge" title="The password is kept by the owner">owner's key</span>{{end}}
 {{if .Locks}}<a href="/repos/view?repo={{.Path}}&amp;tab=run" class="badge{{if .StaleLock}} bad{{end}}" title="{{.Locks}} lock(s), oldest {{.OldestLock}}">locked</a>{{end}}</td>
-<td class="maint">{{if .Busy}}<span class="badge">job running</span>
+<td class="maint">{{if and .OwnerKey (not .Password)}}<span class="muted">managed by the owner</span>
+{{else}}{{if .Busy}}<span class="badge">job running</span>
 {{else}}{{with .LastJob}}<a href="/jobs/{{.ID}}/log" class="status {{if .OK}}ok{{else if .Active}}active{{else}}bad{{end}}" title="Show the log">{{if .OK}}✓{{else if .Active}}…{{else}}✗{{end}} {{.Type}} {{if .OK}}{{.When}}{{else if .Active}}{{.State}}{{else}}{{.State}} {{.When}}{{end}}</a>{{else}}<span class="muted">no run yet</span>{{end}}{{end}}
-<br><small class="muted">{{if .NextRun}}next {{.NextRun}}{{else if not .Missing}}no schedule{{end}}</small></td>
+<br><small class="muted">{{if .NextRun}}next {{.NextRun}}{{else if not .Missing}}no schedule{{end}}</small>{{end}}</td>
 <td class="nowrap{{if .StaleBackup}} stale{{end}}">{{if .LastBackup}}<span title="{{.LastBackupTitle}}">{{.LastBackup}}</span>{{else if .SnapshotCount}}<span class="muted">no snapshots</span>{{end}}</td>
 <td class="num nowrap">{{if .SnapshotCount}}<span title="{{.SnapshotsTitle}}">{{.SnapshotCount}}</span>{{end}}
 {{if and $.JobsAvailable .Password (not .Missing) (not .Busy)}}<form method="post" action="/repos/snapshots" class="inline"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="repo" value="{{.Path}}"><button type="submit" class="link small" title="Refresh snapshots">↻</button></form>{{end}}</td>

@@ -13,6 +13,7 @@ import (
 	"github.com/MB512/belaypoint/internal/jobs"
 	"github.com/MB512/belaypoint/internal/repos"
 	"github.com/MB512/belaypoint/internal/restic"
+	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/vault"
 )
 
@@ -23,11 +24,12 @@ type Policies interface {
 	SetRepoPolicy(ctx context.Context, path string, p *restic.Policy) error
 }
 
-// Archives reads and stores the archive flag (implemented by
+// RepoFlags reads and stores the per-repository marks (implemented by
 // *store.Store).
-type Archives interface {
-	RepoArchived(ctx context.Context, path string) (bool, error)
+type RepoFlags interface {
+	RepoFlags(ctx context.Context, path string) (store.RepoFlags, error)
 	SetRepoArchived(ctx context.Context, path string, archived bool) error
+	SetRepoOwnerKey(ctx context.Context, path string, ownerKey bool) error
 }
 
 // PreviewTimeout bounds "forget --dry-run".
@@ -41,6 +43,7 @@ type repoData struct {
 	TagRows     []tagRow
 	Custom      bool // own policy, not the default
 	Archived    bool // closed repository: no new backups expected
+	OwnerKey    bool // the owner keeps the password; nothing runs here
 	Default     restic.Policy
 	// Tab is the visible tab: tabRun, tabRetention or tabSchedule.
 	Tab string
@@ -124,10 +127,10 @@ func (s *server) repoData(ctx context.Context, path string) (*repoData, error) {
 
 func (s *server) renderRepo(w http.ResponseWriter, r *http.Request, status int, d *repoData, errMsg string) {
 	d.Owner = repos.Owner(d.Path)
-	if archived, err := s.Archives.RepoArchived(r.Context(), d.Path); err != nil {
-		s.Logger.Error("reading archive flag", "repo", d.Path, "err", err)
+	if flags, err := s.Flags.RepoFlags(r.Context(), d.Path); err != nil {
+		s.Logger.Error("reading repository flags", "repo", d.Path, "err", err)
 	} else {
-		d.Archived = archived
+		d.Archived, d.OwnerKey = flags.Archived, flags.OwnerKey
 	}
 	d.Password = s.Vault.Has(vault.RepoSecret(d.Path))
 	d.Default = restic.DefaultPolicy
@@ -298,7 +301,7 @@ func (s *server) setArchived(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	archived := f.get("archived") == "yes"
-	if err := s.Archives.SetRepoArchived(r.Context(), path, archived); err != nil {
+	if err := s.Flags.SetRepoArchived(r.Context(), path, archived); err != nil {
 		s.Logger.Error("storing archive flag", "repo", path, "err", err)
 		http.Error(w, "storing the archive flag failed; see the container log", http.StatusInternalServerError)
 		return
@@ -309,6 +312,39 @@ func (s *server) setArchived(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Audit.Audit(r.Context(), event, path+", "+remote(r))
 	redirect(w, r, "/repos/view?repo="+url.QueryEscape(path)+"&tab="+repoTab(f.get("tab")))
+}
+
+// setOwnerKey marks that the owner keeps the password (ownerkey=yes), so
+// the repository is not reported for a missing one, or removes the mark.
+// The mark contradicts a stored password, so it needs none to be stored.
+func (s *server) setOwnerKey(w http.ResponseWriter, r *http.Request) {
+	f, ok := s.postForm(w, r)
+	if !ok {
+		return
+	}
+	defer f.wipe()
+	path := f.get("repo")
+	if _, ok := s.knownRepo(r.Context(), path); !ok {
+		http.NotFound(w, r)
+		return
+	}
+	on := f.get("ownerkey") == "yes"
+	if on && s.Vault.Has(vault.RepoSecret(path)) {
+		d, _ := s.repoData(r.Context(), path)
+		s.renderRepo(w, r, http.StatusConflict, d, "A password is stored for this repository. Remove it on the password page first.")
+		return
+	}
+	if err := s.Flags.SetRepoOwnerKey(r.Context(), path, on); err != nil {
+		s.Logger.Error("storing owner key flag", "repo", path, "err", err)
+		http.Error(w, "storing the flag failed; see the container log", http.StatusInternalServerError)
+		return
+	}
+	event := "repository mark removed: owner keeps the password"
+	if on {
+		event = "repository marked: owner keeps the password"
+	}
+	s.Audit.Audit(r.Context(), event, path+", "+remote(r))
+	redirect(w, r, "/repos/view?repo="+url.QueryEscape(path))
 }
 
 // previewForget shows what forget with the policy in the form would

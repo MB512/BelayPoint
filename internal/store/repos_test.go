@@ -57,17 +57,17 @@ func TestRepos(t *testing.T) {
 	}
 }
 
-func TestRepoArchived(t *testing.T) {
+func TestRepoFlags(t *testing.T) {
 	ctx := context.Background()
 	s, _ := openTest(t)
 	_ = s.SyncRepos(ctx, []string{"a/one", "b/two"})
-	if got, err := s.RepoArchived(ctx, "a/one"); err != nil || got {
-		t.Fatalf("new repository archived=%v, %v", got, err)
+	if got, err := s.RepoFlags(ctx, "a/one"); err != nil || got != (RepoFlags{}) {
+		t.Fatalf("new repository flags=%+v, %v", got, err)
 	}
 	if err := s.SetRepoArchived(ctx, "a/one", true); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.RepoArchived(ctx, "a/one"); !got {
+	if got, _ := s.RepoFlags(ctx, "a/one"); !got.Archived {
 		t.Error("flag not stored")
 	}
 	list, _ := s.ListRepos(ctx)
@@ -77,16 +77,27 @@ func TestRepoArchived(t *testing.T) {
 	// The flag survives a rediscovery (also of a repository that was missing).
 	_ = s.SyncRepos(ctx, []string{"b/two"})
 	_ = s.SyncRepos(ctx, []string{"a/one", "b/two"})
-	if got, _ := s.RepoArchived(ctx, "a/one"); !got {
+	if got, _ := s.RepoFlags(ctx, "a/one"); !got.Archived {
 		t.Error("flag lost after rediscovery")
 	}
+	// The owner key flag is independent of the archive flag.
+	if err := s.SetRepoOwnerKey(ctx, "b/two", true); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := s.RepoFlags(ctx, "b/two"); f != (RepoFlags{OwnerKey: true}) {
+		t.Errorf("b/two flags %+v", f)
+	}
+	if list, _ := s.ListRepos(ctx); !list[1].OwnerKey || list[0].OwnerKey {
+		t.Errorf("list: %+v", list)
+	}
 	_ = s.SetRepoArchived(ctx, "a/one", false)
-	if got, _ := s.RepoArchived(ctx, "a/one"); got {
+	if got, _ := s.RepoFlags(ctx, "a/one"); got.Archived {
 		t.Error("flag not cleared")
 	}
 	for _, f := range []func() error{
-		func() error { _, err := s.RepoArchived(ctx, "x/y"); return err },
+		func() error { _, err := s.RepoFlags(ctx, "x/y"); return err },
 		func() error { return s.SetRepoArchived(ctx, "x/y", true) },
+		func() error { return s.SetRepoOwnerKey(ctx, "x/y", true) },
 	} {
 		if err := f(); !errors.Is(err, ErrNotFound) {
 			t.Errorf("unknown repository: %v", err)

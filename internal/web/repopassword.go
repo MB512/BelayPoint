@@ -115,6 +115,10 @@ func (s *server) setRepoPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Audit.Audit(r.Context(), "repository password set", path+", "+remote(r))
+	// With a password, "owner keeps the password" no longer applies.
+	if err := s.Flags.SetRepoOwnerKey(r.Context(), path, false); err != nil {
+		s.Logger.Error("clearing owner key flag", "repo", path, "err", err)
+	}
 	if s.Jobs != nil {
 		if _, err := s.Jobs.Submit(r.Context(), path, jobs.Snapshots, jobs.Manual); err != nil {
 			s.Logger.Info("snapshots after storing the password not queued", "repo", path, "err", err)

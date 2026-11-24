@@ -192,6 +192,32 @@ func Locks(dir string) ([]LockFile, error) {
 	return out, nil
 }
 
+// SnapshotFiles counts the snapshot files of the repository at dir and
+// returns the newest modification time (zero without snapshots). Each
+// snapshot is one file, written once when the backup finished, so this
+// shows when the repository was last appended to - without the password
+// (the contents are encrypted, names and times are not).
+func SnapshotFiles(dir string) (count int, newest time.Time, err error) {
+	entries, err := os.ReadDir(filepath.Join(dir, "snapshots"))
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("reading snapshots: %w", err)
+	}
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue // removed meanwhile (forget)
+		}
+		count++
+		if info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+	}
+	return count, newest, nil
+}
+
 // FSUsage describes the file system holding the repositories, in bytes.
 type FSUsage struct {
 	Total int64

@@ -1,6 +1,7 @@
 {{template "top" .}}
 {{with .Repo}}
-<p>User {{.Owner}}. Password: {{if .Password}}stored{{else}}<strong>not set</strong>{{end}}
+{{if .OwnerKey}}<p>User {{.Owner}}. <span class="badge">owner's key</span> The password is kept by the owner.</p>
+{{else}}<p>User {{.Owner}}. Password: {{if .Password}}stored{{else}}<strong>not set</strong>{{end}}
 (<a href="/repos/password?repo={{.Path}}">{{if .Password}}change{{else}}set{{end}}</a>).
 {{with .Plan}}{{if and .Enabled .Next}}Next scheduled run: <strong>{{.Next}}</strong>.{{else}}No scheduled run.{{end}}{{end}}
 Policy: {{if .Custom}}own{{else}}default{{end}}.</p>
@@ -10,6 +11,37 @@ Policy: {{if .Custom}}own{{else}}default{{end}}.</p>
 <button type="submit" name="archived" value="no" class="link small">Mark as active</button>
 {{else}}<button type="submit" name="archived" value="yes" class="link small" title="For a closed repository, e.g. a yearly archive: an old last backup is then not reported">Mark as archive</button>{{end}}
 </form>
+{{end}}
+{{if or .OwnerKey (not .Password)}}<form method="post" action="/repos/owner-key" class="buttons archive">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="repo" value="{{.Path}}">
+{{if .OwnerKey}}<button type="submit" name="ownerkey" value="no" class="link small">Remove the mark</button>
+{{else}}<button type="submit" name="ownerkey" value="yes" class="link small" title="For repositories of other people who keep their password: not reported as missing a password">Owner keeps the password</button>{{end}}
+</form>{{end}}
+{{if .OwnerKey}}
+{{if .Archived}}<form method="post" action="/repos/archive" class="buttons archive">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="repo" value="{{.Path}}">
+<span><span class="badge">archive</span> Closed repository: an old last snapshot is not reported.</span>
+<button type="submit" name="archived" value="no" class="link small">Mark as active</button></form>
+{{else}}<form method="post" action="/repos/archive" class="buttons archive">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="repo" value="{{.Path}}">
+<button type="submit" name="archived" value="yes" class="link small">Mark as archive</button></form>{{end}}
+
+<section class="ownerkey">
+<h2>Password kept by the owner</h2>
+<p>BelayPoint has no password for this repository on purpose, so it is not reported as missing one.
+Without the password it can still show:</p>
+<ul>
+<li>the size (<a href="/storage">Storage</a>) and the lock files,</li>
+<li>the number of snapshot files and when the newest was written, that is when the repository was last appended to.
+If that is longer ago than 7 days, the overview suggests asking the owner whether they still need it or need help.</li>
+</ul>
+<p>It cannot list or check snapshots, run forget, prune or check, or remove locks.
+<strong>The repository only grows:</strong> clients write append-only, so the owner cannot delete anything
+through the rest-server either. To clean up, the owner needs to share the password for a while (or run
+<code>forget</code>/<code>prune</code> through a rest-server without <code>--append-only</code>).</p>
+<p><a href="/repos/password?repo={{.Path}}">Store a password after all</a> (this removes the mark).</p>
+</section>
+{{else}}
 
 <nav class="tabs" aria-label="Repository">
 <a href="/repos/view?repo={{.Path}}&amp;tab=run"{{if eq .Tab "run"}} aria-current="page"{{end}}>Run now</a>
@@ -149,6 +181,7 @@ Within takes a duration such as <code>14d</code>, <code>6m</code> or <code>1y6m<
 <p>With {{if .Unsaved}}these values{{else}}this policy{{end}}, <strong>{{.Remove}} of {{add .Keep .Remove}} snapshots would be removed</strong> and {{.Keep}} kept.
 Nothing has been changed. The space is only freed by a later prune.</p>
 {{template "passes" .}}
+{{end}}
 {{end}}
 {{end}}
 {{end}}

@@ -100,8 +100,9 @@ type Options struct {
 	// Schedule is the running scheduler (nil without restic).
 	Policies Policies
 	Plans    Plans
-	// Archives stores the archive flag of the repositories.
-	Archives Archives
+	// Flags stores the per-repository marks (archive, owner keeps the
+	// password).
+	Flags    RepoFlags
 	Schedule Schedule
 	// JobLogDir holds the job logs (<id>.log).
 	JobLogDir string
@@ -155,6 +156,7 @@ func New(opts Options) http.Handler {
 		r.Get("/repos/view", s.repoPage)
 		r.Post("/repos/policy", s.setPolicy)
 		r.Post("/repos/archive", s.setArchived)
+		r.Post("/repos/owner-key", s.setOwnerKey)
 		r.Post("/repos/plan", s.setPlan)
 		r.Post("/repos/forget-preview", s.previewForget)
 		r.Get("/repos/maintenance", s.maintenancePage)

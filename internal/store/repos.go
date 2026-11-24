@@ -23,6 +23,9 @@ type Repo struct {
 	Snapshots *SnapshotSummary
 	// Archived: closed repository, no new backups expected.
 	Archived bool
+	// OwnerKey: the owner keeps the password; BelayPoint has none on
+	// purpose.
+	OwnerKey bool
 }
 
 // SnapshotSummary is the cached result of the last snapshot listing.
@@ -72,7 +75,7 @@ func (s *Store) SetRepoUsage(ctx context.Context, path string, u repos.Usage, at
 func (s *Store) ListRepos(ctx context.Context) ([]Repo, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT path, missing, first_seen, last_seen, usage_bytes, usage_files, usage_time,
-		        snapshot_count, snapshot_newest, snapshots_time, archived
+		        snapshot_count, snapshot_newest, snapshots_time, archived, owner_key
 		 FROM repos ORDER BY path`)
 	if err != nil {
 		return nil, fmt.Errorf("listing repositories: %w", err)
@@ -85,7 +88,7 @@ func (s *Store) ListRepos(ctx context.Context) ([]Repo, error) {
 		// sql.Null* are like Nullable<T> in C#: Valid says whether the
 		// column was NULL.
 		var bytes, files, at, count, newest, listed sql.NullInt64
-		if err := rows.Scan(&r.Path, &r.Missing, &first, &last, &bytes, &files, &at, &count, &newest, &listed, &r.Archived); err != nil {
+		if err := rows.Scan(&r.Path, &r.Missing, &first, &last, &bytes, &files, &at, &count, &newest, &listed, &r.Archived, &r.OwnerKey); err != nil {
 			return nil, fmt.Errorf("listing repositories: %w", err)
 		}
 		r.FirstSeen, r.LastSeen = time.UnixMilli(first), time.UnixMilli(last)
@@ -107,24 +110,40 @@ func (s *Store) ListRepos(ctx context.Context) ([]Repo, error) {
 	return out, nil
 }
 
-// RepoArchived reports whether the repository is marked as an archive.
-func (s *Store) RepoArchived(ctx context.Context, path string) (bool, error) {
-	var archived bool
-	err := s.db.QueryRowContext(ctx, `SELECT archived FROM repos WHERE path = ?`, path).Scan(&archived)
+// RepoFlags are the per-repository marks set on the repository page.
+type RepoFlags struct {
+	Archived bool
+	OwnerKey bool
+}
+
+// RepoFlags reads the marks of a repository.
+func (s *Store) RepoFlags(ctx context.Context, path string) (RepoFlags, error) {
+	var f RepoFlags
+	err := s.db.QueryRowContext(ctx, `SELECT archived, owner_key FROM repos WHERE path = ?`, path).Scan(&f.Archived, &f.OwnerKey)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, fmt.Errorf("repository %q: %w", path, ErrNotFound)
+		return RepoFlags{}, fmt.Errorf("repository %q: %w", path, ErrNotFound)
 	}
 	if err != nil {
-		return false, fmt.Errorf("reading archive flag of %q: %w", path, err)
+		return RepoFlags{}, fmt.Errorf("reading flags of %q: %w", path, err)
 	}
-	return archived, nil
+	return f, nil
 }
 
 // SetRepoArchived marks the repository as an archive or as active.
 func (s *Store) SetRepoArchived(ctx context.Context, path string, archived bool) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE repos SET archived = ? WHERE path = ?`, archived, path)
+	return s.setFlag(ctx, path, `UPDATE repos SET archived = ? WHERE path = ?`, archived)
+}
+
+// SetRepoOwnerKey marks that the owner keeps the password (or clears it).
+func (s *Store) SetRepoOwnerKey(ctx context.Context, path string, ownerKey bool) error {
+	return s.setFlag(ctx, path, `UPDATE repos SET owner_key = ? WHERE path = ?`, ownerKey)
+}
+
+// setFlag runs one of the constant flag updates above.
+func (s *Store) setFlag(ctx context.Context, path, query string, on bool) error {
+	res, err := s.db.ExecContext(ctx, query, on, path)
 	if err != nil {
-		return fmt.Errorf("storing archive flag of %q: %w", path, err)
+		return fmt.Errorf("storing flag of %q: %w", path, err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("repository %q: %w", path, ErrNotFound)

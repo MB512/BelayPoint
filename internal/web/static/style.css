@@ -184,3 +184,5 @@ td.stale { color: var(--danger); font-weight: 600; }
 a.badge { color: inherit; text-decoration: none; }
 form.inline { display: inline; margin: 0; }
 .toolbar-bottom { margin-top: 1rem; }
+section.ownerkey { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .75rem 1.25rem; margin: 1rem 0; }
+section.ownerkey h2 { margin-top: 0; font-size: 1.1rem; }

@@ -174,6 +174,28 @@ func TestLocks(t *testing.T) {
 	}
 }
 
+func TestSnapshotFiles(t *testing.T) {
+	dir := makeRepo(t, t.TempDir(), "r", 1)
+	if n, newest, err := SnapshotFiles(dir); err != nil || n != 0 || !newest.IsZero() {
+		t.Errorf("empty: %d %v %v", n, newest, err)
+	}
+	t1 := time.Date(2026, 5, 1, 3, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 6, 1, 3, 0, 0, 0, time.UTC)
+	for name, mt := range map[string]time.Time{"aaa": t2, "bbb": t1} {
+		p := filepath.Join(dir, "snapshots", name)
+		_ = os.WriteFile(p, []byte("x"), 0o600)
+		_ = os.Chtimes(p, mt, mt)
+	}
+	_ = os.Mkdir(filepath.Join(dir, "snapshots", "subdir"), 0o755)
+	n, newest, err := SnapshotFiles(dir)
+	if err != nil || n != 2 || !newest.Equal(t2) {
+		t.Errorf("got %d %v %v", n, newest, err)
+	}
+	if _, _, err := SnapshotFiles(t.TempDir()); err == nil {
+		t.Error("missing snapshots dir accepted")
+	}
+}
+
 // memStore records what the scanner reports.
 type memStore struct {
 	synced []string
