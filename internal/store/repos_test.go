@@ -104,3 +104,32 @@ func TestRepoFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteMissingRepo(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	_ = s.SyncRepos(ctx, []string{"a/one", "b/two"})
+	_ = s.SetRepoArchived(ctx, "a/one", true)
+	if err := s.DeleteMissingRepo(ctx, "a/one"); !errors.Is(err, ErrNotMissing) {
+		t.Errorf("present repository: %v", err)
+	}
+	_ = s.SyncRepos(ctx, []string{"b/two"}) // a/one is now missing
+	id, _ := s.AddJob(ctx, "a/one", "check", "manual", time.Now())
+	if err := s.DeleteMissingRepo(ctx, "a/one"); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := s.ListRepos(ctx); len(list) != 1 || list[0].Path != "b/two" {
+		t.Errorf("list %+v", list)
+	}
+	if _, err := s.Job(ctx, id); err != nil {
+		t.Errorf("job history lost: %v", err)
+	}
+	if err := s.DeleteMissingRepo(ctx, "a/one"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("deleted twice: %v", err)
+	}
+	// Found again later: a fresh record, without the old flags.
+	_ = s.SyncRepos(ctx, []string{"a/one", "b/two"})
+	if f, _ := s.RepoFlags(ctx, "a/one"); f.Archived {
+		t.Error("old flags came back")
+	}
+}

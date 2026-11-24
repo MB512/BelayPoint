@@ -235,6 +235,12 @@ hidden entries skipped). A directory is a repository if it contains a `config`
 file and the directories `data`, `index`, `keys`, `locks` and `snapshots`.
 Repositories are identified by their path relative to the root and mirrored
 into the database; a repository that disappears is kept and marked missing.
+"Needs attention" offers to remove a missing repository from BelayPoint:
+its database record (policy, plan, flags), its stored password and its
+schedule are deleted, the job history stays, and nothing below the
+repository root is touched. It is refused while the repository is present
+or its directory exists again (rescan instead); found again later, it
+starts as a new repository.
 Discovery runs at startup and on "Rescan", in the background, followed by the
 disk usage walk of each repository (stored in the database). Before a
 repository directory is used, its path is checked again component by
@@ -267,7 +273,8 @@ The overview (#7) answers "is everything OK, and where do I have to act?":
   files, an active repository whose newest snapshot is older than 7 days
   (`StaleBackupAge`; archives are exempt), a repository no longer found.
   Each entry links to where it is fixed (password page, job log, Run now
-  tab, repository page). Without problems a single "All OK" line is shown.
+  tab, repository page; "Remove from BelayPoint" for a repository no longer
+  found). Without problems a single "All OK" line is shown.
 - The repositories are **grouped by user** (the first path component, as
   with `--private-repos`), users and repositories sorted by name, each
   group with its count and size. Columns: repository (with archive, missing

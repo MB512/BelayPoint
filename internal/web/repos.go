@@ -2,6 +2,7 @@ package web
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/MB512/belaypoint/internal/jobs"
 	"github.com/MB512/belaypoint/internal/repos"
+	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/vault"
 )
 
@@ -89,9 +91,11 @@ type repoGroup struct {
 }
 
 // attention is one line of "Needs attention": the repository, what is
-// wrong and where to fix it.
+// wrong and where to fix it. Forget offers the "Remove from BelayPoint"
+// button of a missing repository instead of a link.
 type attention struct {
 	Path, Problem, Action, Link string
+	Forget                      bool
 }
 
 // home is the overview: all known repositories with what can be read
@@ -329,6 +333,53 @@ func formatAge(d time.Duration) string {
 	}
 }
 
+// forgetMissingRepo removes a repository that discovery no longer finds
+// from BelayPoint: its database record (policy, plan, flags), its stored
+// password and its schedule. Nothing below the repository root is touched;
+// the job history stays. A repository whose directory exists again (no
+// rescan since) is refused.
+func (s *server) forgetMissingRepo(w http.ResponseWriter, r *http.Request) {
+	f, ok := s.postForm(w, r)
+	if !ok {
+		return
+	}
+	defer f.wipe()
+	path := f.get("repo")
+	// repos.Dir checks every path component on disk: no error means the
+	// directory exists again.
+	if _, err := repos.Dir(s.ReposDir, path); err == nil {
+		s.renderHome(w, r, http.StatusConflict, path+" exists again below the repository root; rescan instead of removing it.")
+		return
+	}
+	switch err := s.Repos.DeleteMissingRepo(r.Context(), path); {
+	case errors.Is(err, store.ErrNotFound):
+		http.NotFound(w, r)
+		return
+	case errors.Is(err, store.ErrNotMissing):
+		s.renderHome(w, r, http.StatusConflict, path+" is still present; only missing repositories can be removed.")
+		return
+	case err != nil:
+		s.Logger.Error("removing repository", "repo", path, "err", err)
+		http.Error(w, "removing the repository failed; see the container log", http.StatusInternalServerError)
+		return
+	}
+	details := path
+	if s.Vault.Has(vault.RepoSecret(path)) {
+		if err := s.Vault.DeleteSecret(vault.RepoSecret(path)); err != nil {
+			s.Logger.Error("removing repository password", "repo", path, "err", err)
+		} else {
+			details += ", its stored password too"
+		}
+	}
+	if s.Schedule != nil {
+		if err := s.Schedule.Reload(r.Context()); err != nil {
+			s.Logger.Error("reloading the schedule", "err", err)
+		}
+	}
+	s.Audit.Audit(r.Context(), "missing repository removed", details+", "+remote(r))
+	redirect(w, r, "/")
+}
+
 // overview groups the rows per user (users and repositories by name, as
 // listed) and collects what needs attention, in table order.
 func overview(rows []repoRow) *overviewData {
@@ -359,27 +410,27 @@ func overview(rows []repoRow) *overviewData {
 func problems(r repoRow) []attention {
 	view := "/repos/view?repo=" + url.QueryEscape(r.Path)
 	if r.Missing {
-		return []attention{{r.Path, "no longer found below the repository root", "", ""}}
+		return []attention{{Path: r.Path, Problem: "no longer found below the repository root", Forget: true}}
 	}
 	var out []attention
 	ownerKey := r.OwnerKey && !r.Password
 	if !r.Password && !r.OwnerKey {
-		out = append(out, attention{r.Path, "no password stored: nothing can run", "Set password", "/repos/password?repo=" + url.QueryEscape(r.Path)})
+		out = append(out, attention{Path: r.Path, Problem: "no password stored: nothing can run", Action: "Set password", Link: "/repos/password?repo=" + url.QueryEscape(r.Path)})
 	}
 	if j := r.LastJob; j != nil && !j.OK && !j.Active {
-		out = append(out, attention{r.Path, j.Type + " " + j.State + " " + j.When, "Show log", "/jobs/" + strconv.FormatInt(j.ID, 10) + "/log"})
+		out = append(out, attention{Path: r.Path, Problem: j.Type + " " + j.State + " " + j.When, Action: "Show log", Link: "/jobs/" + strconv.FormatInt(j.ID, 10) + "/log"})
 	}
 	if r.LockError {
-		out = append(out, attention{r.Path, "lock files cannot be read", "", ""})
+		out = append(out, attention{Path: r.Path, Problem: "lock files cannot be read"})
 	} else if r.StaleLock && ownerKey {
-		out = append(out, attention{r.Path, "lock older than 24 h: probably stale; unlocking needs the password, ask the owner", "", ""})
+		out = append(out, attention{Path: r.Path, Problem: "lock older than 24 h: probably stale; unlocking needs the password, ask the owner"})
 	} else if r.StaleLock {
-		out = append(out, attention{r.Path, "lock older than 24 h: probably stale", "Unlock", view + "&tab=run"})
+		out = append(out, attention{Path: r.Path, Problem: "lock older than 24 h: probably stale", Action: "Unlock", Link: view + "&tab=run"})
 	}
 	if r.StaleBackup && ownerKey {
-		out = append(out, attention{r.Path, "no new snapshot (last one " + r.LastBackup + "): ask the owner whether they still need it or need help", "Mark as archive?", view})
+		out = append(out, attention{Path: r.Path, Problem: "no new snapshot (last one " + r.LastBackup + "): ask the owner whether they still need it or need help", Action: "Mark as archive?", Link: view})
 	} else if r.StaleBackup {
-		out = append(out, attention{r.Path, "no recent backup (last one " + r.LastBackup + ")", "Mark as archive?", view})
+		out = append(out, attention{Path: r.Path, Problem: "no recent backup (last one " + r.LastBackup + ")", Action: "Mark as archive?", Link: view})
 	}
 	return out
 }

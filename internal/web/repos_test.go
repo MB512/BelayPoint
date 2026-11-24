@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -236,5 +237,53 @@ func TestHumanAge(t *testing.T) {
 		if got := humanAge(now, now.Add(-d), time.UTC); got != want {
 			t.Errorf("%v: %q, want %q", d, got, want)
 		}
+	}
+}
+
+// A repository that is gone from disk can be removed from BelayPoint (with
+// its stored password); a present one cannot.
+func TestForgetMissingRepo(t *testing.T) {
+	e := newEnv(t, nil, true)
+	ctx := context.Background()
+	makeRepo(t, e.reposDir, "alice/main")
+	_ = e.store.SyncRepos(ctx, []string{"alice/main", "bob/gone"}) // bob/gone has no directory
+	_ = e.store.SyncRepos(ctx, []string{"alice/main"})
+	e.vault.secrets = []string{vault.RepoSecret("bob/gone")}
+	cookie := login(t, e)
+	csrf := csrfFromPage(t, e.h, cookie)
+
+	body := getWithCookie(e.h, "/", cookie).Body.String()
+	if !strings.Contains(body, `action="/repos/forget-missing"`) || !strings.Contains(body, `name="repo" value="bob/gone"`) {
+		t.Fatal("no remove button for the missing repository")
+	}
+	rm := func(path string) *httptest.ResponseRecorder {
+		return post(e.h, "/repos/forget-missing", cookie, url.Values{"csrf_token": {csrf}, "repo": {path}}, nil)
+	}
+	if w := rm("alice/main"); w.Code != http.StatusConflict {
+		t.Errorf("present repository: %d", w.Code)
+	}
+	if w := rm("nobody/x"); w.Code != http.StatusNotFound {
+		t.Errorf("unknown repository: %d", w.Code)
+	}
+	if w := post(e.h, "/repos/forget-missing", cookie, url.Values{"repo": {"bob/gone"}}, nil); w.Code != http.StatusForbidden {
+		t.Errorf("without CSRF token: %d", w.Code)
+	}
+	wantRedirect(t, rm("bob/gone"), "/")
+	if list, _ := e.store.ListRepos(ctx); len(list) != 1 || list[0].Path != "alice/main" {
+		t.Errorf("repositories after removal: %+v", list)
+	}
+	if e.vault.Has(vault.RepoSecret("bob/gone")) || !e.audit.has("missing repository removed") || e.schedule.reloads != 1 {
+		t.Errorf("password left=%v, audited=%v, reloads=%d", e.vault.Has(vault.RepoSecret("bob/gone")), e.audit.has("missing repository removed"), e.schedule.reloads)
+	}
+	if strings.Contains(getWithCookie(e.h, "/", cookie).Body.String(), "no longer found") {
+		t.Error("still listed under Needs attention")
+	}
+
+	// Missing in the database, but its directory is back (no rescan yet).
+	_ = e.store.SyncRepos(ctx, []string{"alice/main", "carol/back"})
+	_ = e.store.SyncRepos(ctx, []string{"alice/main"})
+	makeRepo(t, e.reposDir, "carol/back")
+	if w := rm("carol/back"); w.Code != http.StatusConflict {
+		t.Errorf("directory back: %d", w.Code)
 	}
 }

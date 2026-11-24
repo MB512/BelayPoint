@@ -60,6 +60,32 @@ func (s *Store) SyncRepos(ctx context.Context, paths []string) error {
 	return nil
 }
 
+// ErrNotMissing is returned by DeleteMissingRepo for a repository that is
+// still present.
+var ErrNotMissing = errors.New("repository is still present")
+
+// DeleteMissingRepo forgets a repository that discovery no longer finds:
+// its row with policy, plan and flags. Only missing repositories can be
+// deleted; the job history is kept.
+func (s *Store) DeleteMissingRepo(ctx context.Context, path string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM repos WHERE path = ? AND missing = 1`, path)
+	if err != nil {
+		return fmt.Errorf("deleting repository %q: %w", path, err)
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		return nil
+	}
+	var missing bool
+	err = s.db.QueryRowContext(ctx, `SELECT missing FROM repos WHERE path = ?`, path).Scan(&missing)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("repository %q: %w", path, ErrNotFound)
+	case err != nil:
+		return fmt.Errorf("deleting repository %q: %w", path, err)
+	}
+	return fmt.Errorf("repository %q: %w", path, ErrNotMissing)
+}
+
 // SetRepoUsage stores a disk usage measurement.
 func (s *Store) SetRepoUsage(ctx context.Context, path string, u repos.Usage, at time.Time) error {
 	_, err := s.db.ExecContext(ctx,

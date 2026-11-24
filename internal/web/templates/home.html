@@ -5,7 +5,8 @@
 <section class="attention" aria-labelledby="attention-h">
 <h2 id="attention-h">Needs attention ({{len .Attention}})</h2>
 <ul>
-{{range .Attention}}<li><a href="/repos/view?repo={{.Path}}"><code>{{.Path}}</code></a> <span>{{.Problem}}</span>{{if .Link}} <a class="action" href="{{.Link}}">{{.Action}}</a>{{end}}</li>
+{{range .Attention}}<li>{{if .Forget}}<code>{{.Path}}</code>{{else}}<a href="/repos/view?repo={{.Path}}"><code>{{.Path}}</code></a>{{end}} <span>{{.Problem}}</span>{{if .Link}} <a class="action" href="{{.Link}}">{{.Action}}</a>{{end}}
+{{if .Forget}}<form method="post" action="/repos/forget-missing" class="inline"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="repo" value="{{.Path}}"><button type="submit" class="link small" title="Forget BelayPoint's record of it (settings, stored password). Nothing on disk is touched; found again later, it starts fresh.">Remove from BelayPoint</button></form>{{end}}</li>
 {{end}}
 </ul>
 </section>

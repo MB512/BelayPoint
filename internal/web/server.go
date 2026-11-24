@@ -65,6 +65,7 @@ type AuditLog interface {
 // RepoList lists the known repositories (implemented by *store.Store).
 type RepoList interface {
 	ListRepos(ctx context.Context) ([]store.Repo, error)
+	DeleteMissingRepo(ctx context.Context, path string) error
 }
 
 // Scanner runs repository discovery and disk usage in the background.
@@ -158,6 +159,7 @@ func New(opts Options) http.Handler {
 		r.Post("/repos/policy", s.setPolicy)
 		r.Post("/repos/archive", s.setArchived)
 		r.Post("/repos/owner-key", s.setOwnerKey)
+		r.Post("/repos/forget-missing", s.forgetMissingRepo)
 		r.Post("/repos/plan", s.setPlan)
 		r.Post("/repos/forget-preview", s.previewForget)
 		r.Get("/repos/maintenance", s.maintenancePage)
