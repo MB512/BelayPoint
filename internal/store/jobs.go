@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -105,6 +106,39 @@ func (s *Store) Job(ctx context.Context, id int64) (Job, error) {
 		return Job{}, fmt.Errorf("reading job %d: %w", id, err)
 	}
 	return j, nil
+}
+
+// LastJobs returns the newest job of each repository among the given job
+// types (e.g. the maintenance types), keyed by repository path.
+func (s *Store) LastJobs(ctx context.Context, types []string) (map[string]Job, error) {
+	if len(types) == 0 {
+		return map[string]Job{}, nil
+	}
+	// The types go in as one JSON array parameter (json_each expands it),
+	// so the SQL text is constant.
+	list, err := json.Marshal(types)
+	if err != nil {
+		return nil, fmt.Errorf("reading last jobs: %w", err)
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+jobColumns+` FROM jobs WHERE id IN
+		   (SELECT MAX(id) FROM jobs WHERE type IN (SELECT value FROM json_each(?)) GROUP BY repo)`, string(list))
+	if err != nil {
+		return nil, fmt.Errorf("reading last jobs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]Job{}
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("reading last jobs: %w", err)
+		}
+		out[j.Repo] = j
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reading last jobs: %w", err)
+	}
+	return out, nil
 }
 
 // jobColumns are the columns scanJob reads, in its order.

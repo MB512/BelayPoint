@@ -72,3 +72,26 @@ func TestRepoSnapshots(t *testing.T) {
 		t.Errorf("b: %+v", b)
 	}
 }
+
+func TestLastJobs(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, _ = s.AddJob(ctx, "a/one", "maintenance", "schedule", t0)
+	want, _ := s.AddJob(ctx, "a/one", "prune", "manual", t0)
+	_, _ = s.AddJob(ctx, "a/one", "snapshots", "manual", t0) // not a maintenance type
+	b, _ := s.AddJob(ctx, "b/two", "maintenance", "schedule", t0)
+	_ = s.FinishJob(ctx, b, "failed", "", "disk full", t0)
+	_, _ = s.AddJob(ctx, "c/three", "snapshots", "manual", t0)
+
+	last, err := s.LastJobs(ctx, []string{"maintenance", "forget", "prune", "check"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(last) != 2 || last["a/one"].ID != want || last["b/two"].State != "failed" || last["b/two"].Error != "disk full" {
+		t.Errorf("last = %+v", last)
+	}
+	if none, err := s.LastJobs(ctx, nil); err != nil || len(none) != 0 {
+		t.Errorf("no types: %v %v", none, err)
+	}
+}
