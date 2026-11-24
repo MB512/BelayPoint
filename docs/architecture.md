@@ -360,9 +360,10 @@ with `--no-lock`.
 ### Retention policy and preview
 
 Each repository has a page (path link in the overview) with its retention
-policy: keep last / hourly / daily / weekly / monthly / yearly and keep
-within (a restic duration such as `14d` or `1y6m`), grouped by host and
-paths. A policy without any rule is refused (restic would keep everything).
+policy: keep last, keep within (a restic duration such as `14d` or `1y6m`),
+hourly / daily / weekly / monthly / yearly, in this order in the table
+(read as "at least the last n, everything within d, then one per hour, day,
+…"), grouped by host and paths. A policy without any rule is refused (restic would keep everything).
 Values are validated and passed as separate arguments.
 
 **Tag rules** give snapshots with a tag their own retention (up to 5 rules,
