@@ -39,6 +39,8 @@ type repoRow struct {
 	SnapshotsTitle string
 	// Busy: a job for this repository is queued or running.
 	Busy bool
+	// Archived: closed repository, no new backups expected.
+	Archived bool
 }
 
 // home is the overview: all known repositories with what can be read
@@ -65,6 +67,7 @@ func (s *server) renderHome(w http.ResponseWriter, r *http.Request, status int, 
 			Owner:    repos.Owner(repo.Path),
 			Missing:  repo.Missing,
 			Password: s.Vault.Has(vault.RepoSecret(repo.Path)),
+			Archived: repo.Archived,
 		}
 		if repo.Usage != nil {
 			row.Size = formatBytes(repo.Usage.Bytes)

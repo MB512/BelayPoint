@@ -385,6 +385,13 @@ JavaScript; only the active tab is rendered, and saving returns to it):
 **Schedule** (maintenance plan). Owner, password status, next scheduled run
 and whether the policy is the default stay above the tabs.
 
+Above the tabs, a repository can also be marked as an **archive** (#7): a
+closed repository such as a yearly archive, where no new backups are
+expected, so an old last backup is not reported. The flag is a column of
+`repos`, changed by POST with CSRF token and audit entry ("repository
+marked as archive" / "as active"), and shown as a badge on the overview.
+Maintenance is not affected: forget, prune and check run as configured.
+
 ### Running maintenance by hand
 
 The Run now tab has one block per action: "Unlock" (stale locks; "Remove all
@@ -475,7 +482,7 @@ connections, so services like ntfy work.
 | Table | Content |
 |---|---|
 | `meta` | schema version |
-| `repos` | path (PK), discovered/missing, retention policy (JSON), schedule, step switches, `check_subset_n`, `check_subset_t`, cached snapshot count and newest snapshot |
+| `repos` | path (PK), discovered/missing, retention policy (JSON), schedule, step switches, `check_subset_n`, `check_subset_t`, cached snapshot count and newest snapshot, `archived` |
 | `jobs` | id, repo path, type, trigger (manual/schedule), state, started, finished, exit code, summary (JSON) |
 | `audit` | time, event, details (login, failed login, seal/unseal, user changes, job starts, settings changes) |
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -308,5 +309,45 @@ func TestRepoTabs(t *testing.T) {
 				t.Errorf("tab %q has %q", tab, n)
 			}
 		}
+	}
+}
+
+// The archive flag is set on the repository page (with CSRF and audit) and
+// shown there and on the overview.
+func TestArchiveFlag(t *testing.T) {
+	e := newEnv(t, nil, true)
+	ctx := context.Background()
+	makeRepo(t, e.reposDir, "alice/main")
+	_ = e.store.SyncRepos(ctx, []string{"alice/main"})
+	cookie := login(t, e)
+	csrf := csrfFromPage(t, e.h, cookie)
+
+	body := getWithCookie(e.h, "/repos/view?repo=alice/main", cookie).Body.String()
+	if !strings.Contains(body, `name="archived" value="yes"`) {
+		t.Fatal("no Mark as archive button")
+	}
+	set := func(v, tab string) *httptest.ResponseRecorder {
+		return post(e.h, "/repos/archive", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "archived": {v}, "tab": {tab}}, nil)
+	}
+	wantRedirect(t, set("yes", "schedule"), "/repos/view?repo=alice%2Fmain&tab=schedule")
+	if a, _ := e.store.RepoArchived(ctx, "alice/main"); !a || !e.audit.has("repository marked as archive") {
+		t.Errorf("archived=%v, audited=%v", a, e.audit.has("repository marked as archive"))
+	}
+	body = getWithCookie(e.h, "/repos/view?repo=alice/main", cookie).Body.String()
+	if !strings.Contains(body, "Closed repository") || !strings.Contains(body, `name="archived" value="no"`) {
+		t.Error("repository page does not show the archive state")
+	}
+	if !strings.Contains(getWithCookie(e.h, "/", cookie).Body.String(), `<span class="badge">archive</span>`) {
+		t.Error("overview lacks the archive badge")
+	}
+	wantRedirect(t, set("no", "bogus"), "/repos/view?repo=alice%2Fmain&tab=run")
+	if a, _ := e.store.RepoArchived(ctx, "alice/main"); a {
+		t.Error("not marked as active again")
+	}
+	if w := post(e.h, "/repos/archive", cookie, url.Values{"csrf_token": {csrf}, "repo": {"../x"}, "archived": {"yes"}}, nil); w.Code != http.StatusNotFound {
+		t.Errorf("unknown repository: %d", w.Code)
+	}
+	if w := post(e.h, "/repos/archive", cookie, url.Values{"repo": {"alice/main"}, "archived": {"yes"}}, nil); w.Code != http.StatusForbidden {
+		t.Errorf("without CSRF token: %d", w.Code)
 	}
 }

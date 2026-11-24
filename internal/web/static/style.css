@@ -164,3 +164,4 @@ ol.ranked .num { text-align: right; }
   ol.ranked svg { grid-column: 1 / -1; }
 }
 section.chart + details, details + form.buttons { margin-top: 1rem; }
+form.archive { margin: -.5rem 0 0; gap: .25rem; }

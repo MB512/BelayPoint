@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -20,6 +21,8 @@ type Repo struct {
 	UsageTime time.Time
 	// Snapshots is nil until the first snapshots job succeeded.
 	Snapshots *SnapshotSummary
+	// Archived: closed repository, no new backups expected.
+	Archived bool
 }
 
 // SnapshotSummary is the cached result of the last snapshot listing.
@@ -69,7 +72,7 @@ func (s *Store) SetRepoUsage(ctx context.Context, path string, u repos.Usage, at
 func (s *Store) ListRepos(ctx context.Context) ([]Repo, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT path, missing, first_seen, last_seen, usage_bytes, usage_files, usage_time,
-		        snapshot_count, snapshot_newest, snapshots_time
+		        snapshot_count, snapshot_newest, snapshots_time, archived
 		 FROM repos ORDER BY path`)
 	if err != nil {
 		return nil, fmt.Errorf("listing repositories: %w", err)
@@ -82,7 +85,7 @@ func (s *Store) ListRepos(ctx context.Context) ([]Repo, error) {
 		// sql.Null* are like Nullable<T> in C#: Valid says whether the
 		// column was NULL.
 		var bytes, files, at, count, newest, listed sql.NullInt64
-		if err := rows.Scan(&r.Path, &r.Missing, &first, &last, &bytes, &files, &at, &count, &newest, &listed); err != nil {
+		if err := rows.Scan(&r.Path, &r.Missing, &first, &last, &bytes, &files, &at, &count, &newest, &listed, &r.Archived); err != nil {
 			return nil, fmt.Errorf("listing repositories: %w", err)
 		}
 		r.FirstSeen, r.LastSeen = time.UnixMilli(first), time.UnixMilli(last)
@@ -102,4 +105,29 @@ func (s *Store) ListRepos(ctx context.Context) ([]Repo, error) {
 		return nil, fmt.Errorf("listing repositories: %w", err)
 	}
 	return out, nil
+}
+
+// RepoArchived reports whether the repository is marked as an archive.
+func (s *Store) RepoArchived(ctx context.Context, path string) (bool, error) {
+	var archived bool
+	err := s.db.QueryRowContext(ctx, `SELECT archived FROM repos WHERE path = ?`, path).Scan(&archived)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("repository %q: %w", path, ErrNotFound)
+	}
+	if err != nil {
+		return false, fmt.Errorf("reading archive flag of %q: %w", path, err)
+	}
+	return archived, nil
+}
+
+// SetRepoArchived marks the repository as an archive or as active.
+func (s *Store) SetRepoArchived(ctx context.Context, path string, archived bool) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE repos SET archived = ? WHERE path = ?`, archived, path)
+	if err != nil {
+		return fmt.Errorf("storing archive flag of %q: %w", path, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("repository %q: %w", path, ErrNotFound)
+	}
+	return nil
 }

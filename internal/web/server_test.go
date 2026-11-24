@@ -280,6 +280,7 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 		JobLogDir:     e.logDir,
 		Policies:      db,
 		Plans:         db,
+		Archives:      db,
 		Schedule:      e.schedule,
 		ReposDir:      e.reposDir,
 		Location:      time.UTC,

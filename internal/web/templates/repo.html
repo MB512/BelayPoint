@@ -4,6 +4,12 @@
 (<a href="/repos/password?repo={{.Path}}">{{if .Password}}change{{else}}set{{end}}</a>).
 {{with .Plan}}{{if and .Enabled .Next}}Next scheduled run: <strong>{{.Next}}</strong>.{{else}}No scheduled run.{{end}}{{end}}
 Policy: {{if .Custom}}own{{else}}default{{end}}.</p>
+<form method="post" action="/repos/archive" class="buttons archive">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="repo" value="{{.Path}}"><input type="hidden" name="tab" value="{{.Tab}}">
+{{if .Archived}}<span><span class="badge">archive</span> Closed repository: no new backups are expected, so an old last backup is not reported.</span>
+<button type="submit" name="archived" value="no" class="link small">Mark as active</button>
+{{else}}<button type="submit" name="archived" value="yes" class="link small" title="For a closed repository, e.g. a yearly archive: an old last backup is then not reported">Mark as archive</button>{{end}}
+</form>
 
 <nav class="tabs" aria-label="Repository">
 <a href="/repos/view?repo={{.Path}}&amp;tab=run"{{if eq .Tab "run"}} aria-current="page"{{end}}>Run now</a>

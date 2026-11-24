@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -53,5 +54,42 @@ func TestRepos(t *testing.T) {
 	got, _ = s.ListRepos(ctx)
 	if got[1].Missing || !got[0].Missing {
 		t.Errorf("after return: %+v", got)
+	}
+}
+
+func TestRepoArchived(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	_ = s.SyncRepos(ctx, []string{"a/one", "b/two"})
+	if got, err := s.RepoArchived(ctx, "a/one"); err != nil || got {
+		t.Fatalf("new repository archived=%v, %v", got, err)
+	}
+	if err := s.SetRepoArchived(ctx, "a/one", true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.RepoArchived(ctx, "a/one"); !got {
+		t.Error("flag not stored")
+	}
+	list, _ := s.ListRepos(ctx)
+	if !list[0].Archived || list[1].Archived {
+		t.Errorf("list: %+v", list)
+	}
+	// The flag survives a rediscovery (also of a repository that was missing).
+	_ = s.SyncRepos(ctx, []string{"b/two"})
+	_ = s.SyncRepos(ctx, []string{"a/one", "b/two"})
+	if got, _ := s.RepoArchived(ctx, "a/one"); !got {
+		t.Error("flag lost after rediscovery")
+	}
+	_ = s.SetRepoArchived(ctx, "a/one", false)
+	if got, _ := s.RepoArchived(ctx, "a/one"); got {
+		t.Error("flag not cleared")
+	}
+	for _, f := range []func() error{
+		func() error { _, err := s.RepoArchived(ctx, "x/y"); return err },
+		func() error { return s.SetRepoArchived(ctx, "x/y", true) },
+	} {
+		if err := f(); !errors.Is(err, ErrNotFound) {
+			t.Errorf("unknown repository: %v", err)
+		}
 	}
 }

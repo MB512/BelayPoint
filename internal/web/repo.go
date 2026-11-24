@@ -23,6 +23,13 @@ type Policies interface {
 	SetRepoPolicy(ctx context.Context, path string, p *restic.Policy) error
 }
 
+// Archives reads and stores the archive flag (implemented by
+// *store.Store).
+type Archives interface {
+	RepoArchived(ctx context.Context, path string) (bool, error)
+	SetRepoArchived(ctx context.Context, path string, archived bool) error
+}
+
 // PreviewTimeout bounds "forget --dry-run".
 const PreviewTimeout = 5 * time.Minute
 
@@ -33,6 +40,7 @@ type repoData struct {
 	Policy      restic.Policy
 	TagRows     []tagRow
 	Custom      bool // own policy, not the default
+	Archived    bool // closed repository: no new backups expected
 	Default     restic.Policy
 	// Tab is the visible tab: tabRun, tabRetention or tabSchedule.
 	Tab string
@@ -53,9 +61,13 @@ const (
 
 // repoTab returns the tab named in the query, tabRun if unknown.
 func repoTab(name string) string {
+	// Returning the constants (not name) keeps user input out of redirect
+	// targets.
 	switch name {
-	case tabRetention, tabSchedule:
-		return name
+	case tabRetention:
+		return tabRetention
+	case tabSchedule:
+		return tabSchedule
 	}
 	return tabRun
 }
@@ -112,6 +124,11 @@ func (s *server) repoData(ctx context.Context, path string) (*repoData, error) {
 
 func (s *server) renderRepo(w http.ResponseWriter, r *http.Request, status int, d *repoData, errMsg string) {
 	d.Owner = repos.Owner(d.Path)
+	if archived, err := s.Archives.RepoArchived(r.Context(), d.Path); err != nil {
+		s.Logger.Error("reading archive flag", "repo", d.Path, "err", err)
+	} else {
+		d.Archived = archived
+	}
 	d.Password = s.Vault.Has(vault.RepoSecret(d.Path))
 	d.Default = restic.DefaultPolicy
 	d.TagRows = tagRows(d.Policy)
@@ -265,6 +282,33 @@ func (s *server) setPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Audit.Audit(r.Context(), "policy changed", path+": "+details+", "+remote(r))
 	redirect(w, r, "/repos/view?repo="+url.QueryEscape(path)+"&tab="+tabRetention)
+}
+
+// setArchived marks a repository as an archive (archived=yes) or as
+// active, and returns to the tab it was changed on.
+func (s *server) setArchived(w http.ResponseWriter, r *http.Request) {
+	f, ok := s.postForm(w, r)
+	if !ok {
+		return
+	}
+	defer f.wipe()
+	path := f.get("repo")
+	if _, ok := s.knownRepo(r.Context(), path); !ok {
+		http.NotFound(w, r)
+		return
+	}
+	archived := f.get("archived") == "yes"
+	if err := s.Archives.SetRepoArchived(r.Context(), path, archived); err != nil {
+		s.Logger.Error("storing archive flag", "repo", path, "err", err)
+		http.Error(w, "storing the archive flag failed; see the container log", http.StatusInternalServerError)
+		return
+	}
+	event := "repository marked as active"
+	if archived {
+		event = "repository marked as archive"
+	}
+	s.Audit.Audit(r.Context(), event, path+", "+remote(r))
+	redirect(w, r, "/repos/view?repo="+url.QueryEscape(path)+"&tab="+repoTab(f.get("tab")))
 }
 
 // previewForget shows what forget with the policy in the form would

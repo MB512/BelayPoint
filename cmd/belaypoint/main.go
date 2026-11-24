@@ -210,6 +210,7 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 			JobLogDir:     logDir,
 			Policies:      db,
 			Plans:         db,
+			Archives:      db,
 			Schedule:      schedule,
 			ReposDir:      cfg.ReposDir,
 			Location:      cfg.Location,
