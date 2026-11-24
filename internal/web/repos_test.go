@@ -67,6 +67,17 @@ func TestOverview(t *testing.T) {
 			t.Errorf("overview lacks %q", want)
 		}
 	}
+	// Locks link to the Run now tab; unlocking happens there.
+	if !strings.Contains(body, `href="/repos/view?repo=bob%2fmain&amp;tab=run"`) || strings.Contains(body, "/repos/unlock") {
+		t.Error("overview: locks not linked to the Run now tab, or unlock buttons left")
+	}
+	e.vault.secrets = append(e.vault.secrets, vault.RepoSecret("bob/main"))
+	run := getWithCookie(e.h, "/repos/view?repo=bob/main&tab=run", cookie).Body.String()
+	for _, want := range []string{"Locks now:", "1, oldest 30 h", "probably stale", `action="/repos/unlock"`} {
+		if !strings.Contains(run, want) {
+			t.Errorf("Run now tab lacks %q", want)
+		}
+	}
 }
 
 func TestRescan(t *testing.T) {

@@ -159,10 +159,6 @@ func (s *server) jobFailed(w http.ResponseWriter, r *http.Request, path string, 
 	s.renderRepo(w, r, status, d, msg)
 }
 
-// fromRepo reports whether a form was sent from the repository page
-// (hidden field from=repo).
-func fromRepo(f form) bool { return f.get("from") == "repo" }
-
 // submitCheck queues a manual check. The two optional fields subset_n and
 // subset_t ("read part n of t") become --read-data-subset n/t; both empty
 // checks the structure only.
@@ -205,7 +201,7 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.wipe()
-	s.submitJob(w, r, f.get("repo"), jobs.Unlock, fromRepo(f))
+	s.submitJob(w, r, f.get("repo"), jobs.Unlock, true)
 }
 
 func (s *server) unlockAllPage(w http.ResponseWriter, r *http.Request) {
@@ -214,13 +210,13 @@ func (s *server) unlockAllPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.renderUnlockAll(w, r, http.StatusOK, path, r.URL.Query().Get("from") == "repo", "")
+	s.renderUnlockAll(w, r, http.StatusOK, path, "")
 }
 
-func (s *server) renderUnlockAll(w http.ResponseWriter, r *http.Request, status int, path string, toRepo bool, errMsg string) {
+func (s *server) renderUnlockAll(w http.ResponseWriter, r *http.Request, status int, path, errMsg string) {
 	s.render(w, status, "unlock-all.html", page{
 		Title: "Remove all locks", CSRF: sessionFrom(r.Context()).CSRF, Error: errMsg,
-		RepoPassword: &repoPasswordData{Path: path, FromRepo: toRepo},
+		RepoPassword: &repoPasswordData{Path: path},
 	})
 }
 
@@ -238,10 +234,10 @@ func (s *server) unlockAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if f.get("confirm_name") != path {
-		s.renderUnlockAll(w, r, http.StatusBadRequest, path, fromRepo(f), "The typed name does not match the repository.")
+		s.renderUnlockAll(w, r, http.StatusBadRequest, path, "The typed name does not match the repository.")
 		return
 	}
-	s.submitJob(w, r, path, jobs.UnlockAll, fromRepo(f))
+	s.submitJob(w, r, path, jobs.UnlockAll, true)
 }
 
 // jobLog shows the log file of a job (the last maxLogBytes of it).

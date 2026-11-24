@@ -30,9 +30,6 @@ type repoPasswordData struct {
 	Stored bool
 	// Available is false when restic is not installed.
 	Available bool
-	// FromRepo: the unlock-all page was opened from the repository page
-	// and returns there.
-	FromRepo bool
 }
 
 // knownRepo resolves path to its directory, only for a repository that

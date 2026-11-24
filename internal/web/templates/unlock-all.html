@@ -5,15 +5,14 @@ checks that are running right now.</strong> A running client can then write into
 process changes it, which can damage the repository.</p>
 <p>Use this only when you are sure nothing is running, for example when a client was shut down in the middle of a
 backup less than 30 minutes ago (restic treats such a lock as stale only after 30 minutes without refresh, unless
-it was created on this machine). For older locks, "Remove stale locks" on the overview is enough.</p>
+it was created on this machine). For older locks, "Unlock" on the Run now tab is enough.</p>
 <form method="post" action="/repos/unlock-all" class="stack">
 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
 <input type="hidden" name="repo" value="{{.Path}}">
-{{if .FromRepo}}<input type="hidden" name="from" value="repo">{{end}}
 <label>Type the repository name <code>{{.Path}}</code> to confirm
 <input type="text" name="confirm_name" autocomplete="off" required></label>
 <button type="submit" class="danger">Remove all locks</button>
 </form>
-<p><a href="{{if .FromRepo}}/repos/view?repo={{.Path}}{{else}}/{{end}}">Cancel</a></p>
+<p><a href="/repos/view?repo={{.Path}}">Cancel</a></p>
 {{end}}
 {{template "bottom" .}}

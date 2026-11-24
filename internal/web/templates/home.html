@@ -21,9 +21,7 @@ at start and on rescan; lock files are read live.</p>
 <td class="num">{{if .Size}}{{.Files}}{{end}}</td>
 <td class="nowrap">{{if .Busy}}<span class="badge">job running</span>{{else if .Snapshots}}<span title="{{.SnapshotsTitle}}">{{.Snapshots}}</span>{{end}}
 {{if and $.JobsAvailable .Password (not .Missing) (not .Busy)}}<form method="post" action="/repos/snapshots"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="repo" value="{{.Path}}"><button type="submit" class="link small" title="Refresh snapshots">↻</button></form>{{end}}</td>
-<td class="nowrap">{{if .LockError}}<span class="badge bad">unreadable</span>{{else if .Locks}}<span class="badge{{if .StaleLock}} bad{{end}}" title="{{if .StaleLock}}older than 24 h: probably stale{{end}}">{{.Locks}}, oldest {{.OldestLock}}</span>
-{{if and $.JobsAvailable .Password (not .Busy)}}<form method="post" action="/repos/unlock"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="repo" value="{{.Path}}"><button type="submit" class="link small" title="restic unlock: removes locks whose process is gone or that were not refreshed for 30 minutes">Remove stale</button></form>
-<a class="danger small" href="/repos/unlock-all?repo={{.Path}}" title="restic unlock --remove-all">all…</a>{{end}}{{else if not .Missing}}none{{end}}</td>
+<td class="nowrap">{{if .LockError}}<span class="badge bad">unreadable</span>{{else if .Locks}}<a href="/repos/view?repo={{.Path}}&amp;tab=run" title="Unlock on the repository's Run now tab{{if .StaleLock}}; older than 24 h: probably stale{{end}}"><span class="badge{{if .StaleLock}} bad{{end}}">{{.Locks}}, oldest {{.OldestLock}}</span></a>{{else if not .Missing}}none{{end}}</td>
 <td class="nowrap">{{if .Missing}}{{if .Password}}stored{{end}}{{else}}<a href="/repos/password?repo={{.Path}}">{{if .Password}}stored{{else}}set…{{end}}</a>{{end}}</td>
 </tr>
 {{end}}

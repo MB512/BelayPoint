@@ -19,11 +19,12 @@ Policy: {{if .Custom}}own{{else}}default{{end}}.</p>
 <h3>Unlock</h3>
 <p class="muted">Removes stale locks: locks whose process is gone or that were not refreshed for 30 minutes
 (left by crashed or interrupted clients).</p>
+<p>Locks now: {{with .Locks}}{{if .LockError}}<span class="badge bad">unreadable</span>{{else if .Locks}}<span class="badge{{if .StaleLock}} bad{{end}}">{{.Locks}}, oldest {{.OldestLock}}</span>{{if .StaleLock}} <span class="muted">(older than 24 h: probably stale)</span>{{end}}{{else}}none{{end}}{{end}}</p>
 <div class="buttons">
 <form method="post" action="/repos/unlock"><input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-<input type="hidden" name="repo" value="{{.Path}}"><input type="hidden" name="from" value="repo">
+<input type="hidden" name="repo" value="{{.Path}}">
 <button type="submit">Unlock</button></form>
-<a class="danger" href="/repos/unlock-all?repo={{.Path}}&amp;from=repo" title="restic unlock --remove-all">Remove all locks…</a>
+<a class="danger" href="/repos/unlock-all?repo={{.Path}}" title="restic unlock --remove-all">Remove all locks…</a>
 </div>
 </section>
 

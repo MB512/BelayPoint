@@ -127,18 +127,16 @@ func TestUnlock(t *testing.T) {
 		t.Errorf("submitted %v", e.jobs.submitted)
 	}
 
-	// Started on the repository page (from=repo): errors are shown there,
-	// and the unlock-all page returns there on cancel.
+	// Unlocking happens on the Run now tab: errors are shown there, and
+	// the unlock-all page returns there on cancel.
 	e.jobs.err = jobs.ErrBusy
-	if body := post(e.h, "/repos/unlock", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "from": {"repo"}}, nil).Body.String(); !strings.Contains(body, `tab=run" aria-current="page"`) || !strings.Contains(body, "already queued or running") {
+	if body := post(e.h, "/repos/unlock", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}}, nil).Body.String(); !strings.Contains(body, `tab=run" aria-current="page"`) || !strings.Contains(body, "already queued or running") {
 		t.Error("refused unlock not shown on the repository page")
 	}
 	e.jobs.err = nil
-	body := getWithCookie(e.h, "/repos/unlock-all?repo=alice/main&from=repo", cookie).Body.String()
-	if !strings.Contains(body, `name="from" value="repo"`) || !strings.Contains(body, `href="/repos/view?repo=alice%2fmain">Cancel`) {
-		t.Error("unlock-all page from the repository page does not return there")
+	if body := getWithCookie(e.h, "/repos/unlock-all?repo=alice/main", cookie).Body.String(); !strings.Contains(body, `href="/repos/view?repo=alice%2fmain">Cancel`) {
+		t.Error("unlock-all page does not return to the repository page")
 	}
-	wantRedirect(t, post(e.h, "/repos/unlock-all", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "confirm_name": {"alice/main"}, "from": {"repo"}}, nil), "/jobs/3/log")
 }
 
 func TestJobLogPage(t *testing.T) {

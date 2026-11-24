@@ -36,6 +36,8 @@ type repoData struct {
 	Default     restic.Policy
 	// Tab is the visible tab: tabRun, tabRetention or tabSchedule.
 	Tab string
+	// Locks are the repository's lock files, read live for the Run now tab.
+	Locks *repoRow
 	// Preview is set after "Preview these values".
 	Preview *previewData
 	Plan    *planData
@@ -115,6 +117,10 @@ func (s *server) renderRepo(w http.ResponseWriter, r *http.Request, status int, 
 	d.TagRows = tagRows(d.Policy)
 	if d.Tab == "" {
 		d.Tab = tabRun
+	}
+	if d.Tab == tabRun {
+		d.Locks = &repoRow{Path: d.Path}
+		s.addLocks(d.Locks, time.Now())
 	}
 	if d.Plan == nil {
 		plan, err := s.planFor(r.Context(), d.Path)

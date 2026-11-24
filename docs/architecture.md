@@ -368,7 +368,7 @@ and whether the policy is the default stay above the tabs.
 The Run now tab has one block per action: "Unlock" (stale locks; "Remove all
 locks…" leads to the typed confirmation of `unlock --remove-all`),
 "Forget…", "Prune…" and "Check". It needs the repository password. A job
-started by hand (here or "Remove stale" on the overview) leads straight to
+started by hand leads straight to
 its log page; a refused job is reported on the page it was started from.
 forget and prune open a confirmation page; check runs directly. The forget
 confirmation page runs the dry-run with the saved policy (like "Preview these
@@ -431,10 +431,12 @@ recorded as a job with state `skipped` and the reason.
   (`<meta http-equiv="refresh">`, no JavaScript) while the job is queued or
   running. Logs older than
   `BELAYPOINT_JOB_LOG_RETENTION` are removed at startup and daily.
-- Locks: the overview offers "Remove stale" (`unlock`: restic removes locks
-  whose process is gone on the same host, or that were not refreshed for 30
-  minutes) and "all…" (`unlock --remove-all` on a page that warns and needs
-  the repository name typed).
+- Locks: the overview shows the lock files per repository (count and age,
+  read live) and links them to the Run now tab, which shows them again and
+  offers "Unlock" (`unlock`: restic removes locks whose process is gone on
+  the same host, or that were not refreshed for 30 minutes) and "Remove all
+  locks…" (`unlock --remove-all` on a page that warns and needs the
+  repository name typed).
 - States: `queued`, `running`, `succeeded`, `failed`, `refused`,
   `interrupted`, `skipped` (a scheduled run that could not start). The "Jobs" page lists them, newest first.
 - After a restart, jobs still marked as queued or running are set to
