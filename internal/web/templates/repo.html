@@ -34,7 +34,7 @@ Policy: {{if .Custom}}own{{else}}default{{end}}.</p>
 <p class="muted">Removes the snapshots that the <a href="/repos/view?repo={{.Path}}&amp;tab=retention">retention policy</a> does not keep.
 They cannot be restored afterwards. The next page shows a preview (dry-run) of what would be removed before
 anything happens.</p>
-<div class="buttons"><a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=forget">Forget…</a></div>
+<div class="buttons"><a class="button" href="/repos/maintenance?repo={{.Path}}&amp;job=forget" title="Shows the dry-run first; nothing is removed yet">Forget…</a></div>
 </section>
 
 <section class="action">
