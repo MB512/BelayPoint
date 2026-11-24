@@ -104,7 +104,14 @@ therefore the unsealed secrets; nothing in a container prevents that.
 12. **Audit log.** Login, failed login, unseal/seal, password change, user
     changes in `.htpasswd`, repository passwords stored, rejected by restic
     or removed, job starts (manual
-    and scheduled), settings changes. No secrets in entries.
+    and scheduled), settings changes (including the notification
+    switches and test notifications). No secrets in entries.
+13. **Notifications.** The ntfy URL and token come from the environment,
+    like the rest of the configuration (not the vault: the "sealed"
+    message is sent while sealed). The token is only put into the
+    `Authorization` header; neither the token nor the URL's path (the
+    topic) appears in the UI, logs or audit entries. Messages carry
+    repository names, counts, sizes and error texts, never passwords.
 
 ## Reporting vulnerabilities
 

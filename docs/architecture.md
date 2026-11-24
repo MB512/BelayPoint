@@ -104,7 +104,8 @@ networks:
 | `BELAYPOINT_MAX_JOBS` | maintenance jobs running at the same time across all repositories (disk load on the NAS), default `1` |
 | `BELAYPOINT_LOCK_WAIT` | how long a job waits for other locks to go away (`restic --retry-lock`), default `30m` |
 | `BELAYPOINT_SESSION_TTL` | session lifetime, default `8h` |
-| `BELAYPOINT_NOTIFY_URL` | reserved for notifications: parsed and validated (http(s) URL), but nothing is sent yet (see "Notifications") |
+| `BELAYPOINT_NOTIFY_URL` | ntfy topic URL for notifications (http(s), e.g. `https://ntfy.sh/your-secret-topic`); empty disables them |
+| `BELAYPOINT_NOTIFY_TOKEN` | optional ntfy access token, sent as `Authorization: Bearer`; only together with the URL |
 | `BELAYPOINT_JOB_LOG_RETENTION` | delete job logs older than this (Go duration), default `2160h` (90 days) |
 | `BELAYPOINT_LOG_LEVEL` | `debug`, `info`, `warn`, `error` |
 | `TZ` | time zone of schedules and of all times in the UI; an unknown zone is a configuration error |
@@ -540,11 +541,38 @@ recorded as a job with state `skipped` and the reason.
 
 ## Notifications
 
-BelayPoint sends no notifications yet. `BELAYPOINT_NOTIFY_URL` is parsed and
-validated at startup but not used. Failed or skipped runs, stale locks and
-the other problems are visible only in the UI ("Needs attention" on the
-overview, the Jobs page). Notifications by e-mail (and optionally other
-channels), each event switchable, are discussed in #12.
+With `BELAYPOINT_NOTIFY_URL` set, BelayPoint posts notifications to an
+ntfy-compatible webhook (#12; e-mail was considered and dropped): an HTTP
+POST to the topic URL with the message as text body and `Title`,
+`Priority` and `Tags` headers, plus `Authorization: Bearer` when
+`BELAYPOINT_NOTIFY_TOKEN` is set. URL and token are environment variables,
+not vault secrets, because the "sealed" message has to go out while
+sealed. `internal/notify` queues messages (64) and sends them in the
+background with a 15 s timeout, so a slow or failing webhook never blocks
+or fails a job; failures are logged without the URL (the topic name can act
+as a secret). Messages still queued at shutdown are sent.
+
+Events, each switchable on the Settings page (stored in the `settings`
+table, all on by default):
+
+| Event | When | Priority |
+|---|---|---|
+| failed | a forget, prune, check or maintenance job failed, was refused or interrupted; a scheduled run was skipped (sealed, no password, a job still running) | high |
+| attention | "Needs attention" changed: entries that appeared or were resolved (failed maintenance is left out, the "failed" event reports it) | high |
+| sealed | BelayPoint started with an initialized vault and is sealed | high |
+| forget | after a forget: snapshots removed and kept | low |
+| prune | after a prune: space freed and remaining (restic's "total prune" and "remaining" lines), duration | low |
+
+A scheduled maintenance run sends one message with its forget and prune
+lines (as far as those events are on), not one per step. "Needs attention"
+is checked 2 minutes after the start and then every 5 minutes, only while
+unsealed (sealed, every repository would look as if it had no password);
+the last notified state is stored, so only changes are reported, also
+across restarts, and a change while the event is off is not reported
+later. The Settings page shows the webhook's scheme and host only, whether
+a token is set, the switches and a "Send test notification" button.
+Messages contain repository names, counts, sizes and error texts; no
+passwords.
 
 ## Data model (SQLite)
 

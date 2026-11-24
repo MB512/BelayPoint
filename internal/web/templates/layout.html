@@ -20,6 +20,7 @@
 <a href="/jobs" aria-current="{{active .Title "Jobs"}}">Jobs</a>
 <a href="/users" aria-current="{{active .Title "Users"}}">Users</a>
 <a href="/audit" aria-current="{{active .Title "Audit log"}}">Audit log</a>
+<a href="/settings" aria-current="{{active .Title "Settings"}}">Settings</a>
 </nav>
 <nav>
 <form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit" class="link" title="End this session; the vault stays unsealed and scheduled jobs keep running">Log out</button></form>

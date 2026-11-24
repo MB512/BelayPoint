@@ -1,0 +1,30 @@
+{{template "top" .}}
+{{with .Settings}}
+<h2>Notifications</h2>
+{{if .Target}}
+<p>Notifications go to the ntfy webhook at <code>{{.Target}}</code>{{if .TokenSet}} with an access token{{end}}
+(<code>BELAYPOINT_NOTIFY_URL</code>{{if .TokenSet}}, <code>BELAYPOINT_NOTIFY_TOKEN</code>{{end}}).</p>
+{{else}}
+<p class="warn">No webhook is configured. Set <code>BELAYPOINT_NOTIFY_URL</code> to an ntfy topic URL (for example
+<code>https://ntfy.sh/your-secret-topic</code>), optionally <code>BELAYPOINT_NOTIFY_TOKEN</code> for an access
+token, and restart the container. The switches below are kept until then.</p>
+{{end}}
+{{if .Result}}<p class="{{if .OK}}notice{{else}}error{{end}}" role="status">{{.Result}}</p>{{end}}
+<form method="post" action="/settings/notifications" class="stack">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<fieldset><legend>Send a notification when</legend>
+{{range .Events}}<label class="check"><input type="checkbox" name="event_{{.Event}}" value="on" {{if .On}}checked{{end}}> {{.Label}}</label>
+{{end}}</fieldset>
+<p class="muted">A scheduled maintenance run sends one message with all its steps. "Needs attention" reports
+only changes (new and resolved entries), checked every few minutes while BelayPoint is unsealed; failed
+maintenance is reported by the first switch, when it happens.</p>
+<div class="buttons"><button type="submit">Save</button></div>
+</form>
+{{if .Target}}
+<form method="post" action="/settings/notifications/test" class="buttons">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<button type="submit" class="secondary">Send test notification</button>
+</form>
+{{end}}
+{{end}}
+{{template "bottom" .}}

@@ -2,6 +2,7 @@ package web
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -96,6 +97,9 @@ type repoGroup struct {
 type attention struct {
 	Path, Problem, Action, Link string
 	Forget                      bool
+	// Kind names the problem for notifications, which report only changes:
+	// missing, password, job, lockerror, lock, stale.
+	Kind string
 }
 
 // home is the overview: all known repositories with what can be read
@@ -105,21 +109,33 @@ func (s *server) home(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) renderHome(w http.ResponseWriter, r *http.Request, status int, errMsg string) {
-	list, err := s.Repos.ListRepos(r.Context())
+	rows, err := s.repoRows(r.Context(), time.Now())
 	if err != nil {
 		s.Logger.Error("listing repositories", "err", err)
 		http.Error(w, "listing repositories failed; see the container log", http.StatusInternalServerError)
 		return
 	}
-	now := time.Now()
 	p := page{
 		Title: "Overview", CSRF: sessionFrom(r.Context()).CSRF, Error: errMsg,
-		Scanning: s.Scanner.Scanning(), JobsAvailable: s.Jobs != nil,
+		Scanning: s.Scanner.Scanning(), JobsAvailable: s.Jobs != nil, Repos: rows,
 	}
-	last, err := s.JobList.LastJobs(r.Context(), maintenanceTypes)
+	_, p.Total = summarize(p.Repos)
+	p.Overview = overview(p.Repos)
+	s.render(w, status, "home.html", p)
+}
+
+// repoRows reads everything the overview shows per repository (also used
+// by the "Needs attention" notifications).
+func (s *server) repoRows(ctx context.Context, now time.Time) ([]repoRow, error) {
+	list, err := s.Repos.ListRepos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	last, err := s.JobList.LastJobs(ctx, maintenanceTypes)
 	if err != nil {
 		s.Logger.Error("reading last jobs", "err", err)
 	}
+	var rows []repoRow
 	for _, repo := range list {
 		row := repoRow{
 			Path:     repo.Path,
@@ -164,11 +180,9 @@ func (s *server) renderHome(w http.ResponseWriter, r *http.Request, status int, 
 				}
 			}
 		}
-		p.Repos = append(p.Repos, row)
+		rows = append(rows, row)
 	}
-	_, p.Total = summarize(p.Repos)
-	p.Overview = overview(p.Repos)
-	s.render(w, status, "home.html", p)
+	return rows, nil
 }
 
 // ownerRow is one line of the per-user summary; the total uses it too.
@@ -410,27 +424,27 @@ func overview(rows []repoRow) *overviewData {
 func problems(r repoRow) []attention {
 	view := "/repos/view?repo=" + url.QueryEscape(r.Path)
 	if r.Missing {
-		return []attention{{Path: r.Path, Problem: "no longer found below the repository root", Forget: true}}
+		return []attention{{Path: r.Path, Kind: "missing", Problem: "no longer found below the repository root", Forget: true}}
 	}
 	var out []attention
 	ownerKey := r.OwnerKey && !r.Password
 	if !r.Password && !r.OwnerKey {
-		out = append(out, attention{Path: r.Path, Problem: "no password stored: nothing can run", Action: "Set password", Link: "/repos/password?repo=" + url.QueryEscape(r.Path)})
+		out = append(out, attention{Path: r.Path, Kind: "password", Problem: "no password stored: nothing can run", Action: "Set password", Link: "/repos/password?repo=" + url.QueryEscape(r.Path)})
 	}
 	if j := r.LastJob; j != nil && !j.OK && !j.Active {
-		out = append(out, attention{Path: r.Path, Problem: j.Type + " " + j.State + " " + j.When, Action: "Show log", Link: "/jobs/" + strconv.FormatInt(j.ID, 10) + "/log"})
+		out = append(out, attention{Path: r.Path, Kind: "job", Problem: j.Type + " " + j.State + " " + j.When, Action: "Show log", Link: "/jobs/" + strconv.FormatInt(j.ID, 10) + "/log"})
 	}
 	if r.LockError {
-		out = append(out, attention{Path: r.Path, Problem: "lock files cannot be read"})
+		out = append(out, attention{Path: r.Path, Kind: "lockerror", Problem: "lock files cannot be read"})
 	} else if r.StaleLock && ownerKey {
-		out = append(out, attention{Path: r.Path, Problem: "lock older than 24 h: probably stale; unlocking needs the password, ask the owner"})
+		out = append(out, attention{Path: r.Path, Kind: "lock", Problem: "lock older than 24 h: probably stale; unlocking needs the password, ask the owner"})
 	} else if r.StaleLock {
-		out = append(out, attention{Path: r.Path, Problem: "lock older than 24 h: probably stale", Action: "Unlock", Link: view + "&tab=run"})
+		out = append(out, attention{Path: r.Path, Kind: "lock", Problem: "lock older than 24 h: probably stale", Action: "Unlock", Link: view + "&tab=run"})
 	}
 	if r.StaleBackup && ownerKey {
-		out = append(out, attention{Path: r.Path, Problem: "no new snapshot (last one " + r.LastBackup + "): ask the owner whether they still need it or need help", Action: "Mark as archive?", Link: view})
+		out = append(out, attention{Path: r.Path, Kind: "stale", Problem: "no new snapshot (last one " + r.LastBackup + "): ask the owner whether they still need it or need help", Action: "Mark as archive?", Link: view})
 	} else if r.StaleBackup {
-		out = append(out, attention{Path: r.Path, Problem: "no recent backup (last one " + r.LastBackup + ")", Action: "Mark as archive?", Link: view})
+		out = append(out, attention{Path: r.Path, Kind: "stale", Problem: "no recent backup (last one " + r.LastBackup + ")", Action: "Mark as archive?", Link: view})
 	}
 	return out
 }

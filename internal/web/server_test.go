@@ -18,6 +18,7 @@ import (
 	"github.com/MB512/belaypoint/internal/auth"
 	"github.com/MB512/belaypoint/internal/htpasswd"
 	"github.com/MB512/belaypoint/internal/jobs"
+	"github.com/MB512/belaypoint/internal/notify"
 	"github.com/MB512/belaypoint/internal/restic"
 	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/vault"
@@ -253,6 +254,7 @@ type testEnv struct {
 	restic   *fakeRestic
 	jobs     *fakeJobs
 	schedule *fakeSchedule
+	notifier *fakeNotifier
 	reposDir string
 	logDir   string
 	opts     Options
@@ -275,6 +277,7 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 	if initialized {
 		e.vault.password, e.vault.sealed, code = []byte("correct horse battery"), true, ""
 	}
+	e.notifier = &fakeNotifier{configured: true}
 	e.opts = Options{
 		Version:       "test",
 		CAPEM:         caPEM,
@@ -295,6 +298,8 @@ func newEnv(t *testing.T, caPEM []byte, initialized bool) *testEnv {
 		Policies:      db,
 		Plans:         db,
 		Flags:         db,
+		Notifier:      e.notifier,
+		Settings:      db,
 		Schedule:      e.schedule,
 		ReposDir:      e.reposDir,
 		Location:      time.UTC,
@@ -386,4 +391,38 @@ func TestCloudflareRejected(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Errorf("got %d", w.Code)
 	}
+}
+
+// fakeNotifier records notifications.
+type fakeNotifier struct {
+	mu         sync.Mutex
+	configured bool
+	sendErr    error
+	sent       []notify.Message
+	settings   notify.SettingStore
+}
+
+func (f *fakeNotifier) Configured() bool { return f.configured }
+func (f *fakeNotifier) Enabled(ctx context.Context, e notify.Event) bool {
+	if f.settings == nil {
+		return f.configured
+	}
+	return f.configured && notify.EnabledIn(f.settings)(ctx, e)
+}
+func (f *fakeNotifier) Notify(ctx context.Context, m notify.Message) {
+	if !f.Enabled(ctx, m.Event) {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sent = append(f.sent, m)
+}
+func (f *fakeNotifier) SendNow(_ context.Context, m notify.Message) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sendErr != nil {
+		return f.sendErr
+	}
+	f.sent = append(f.sent, m)
+	return nil
 }

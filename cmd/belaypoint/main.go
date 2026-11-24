@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -33,6 +34,7 @@ import (
 	"github.com/MB512/belaypoint/internal/htpasswd"
 	"github.com/MB512/belaypoint/internal/jobs"
 	"github.com/MB512/belaypoint/internal/netguard"
+	"github.com/MB512/belaypoint/internal/notify"
 	"github.com/MB512/belaypoint/internal/repos"
 	"github.com/MB512/belaypoint/internal/restic"
 	"github.com/MB512/belaypoint/internal/scheduler"
@@ -130,6 +132,25 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 		logger.Warn("vault: not initialized; open the web UI, enter this setup code and choose the admin password", "setup_code", setupCode)
 	}
 
+	// Notifications (ntfy webhook; without BELAYPOINT_NOTIFY_URL every
+	// message is dropped). The notifier outlives ctx: jobs interrupted by
+	// the shutdown still report, and it stops after them.
+	notifier := notify.New(cfg.NotifyURL, cfg.NotifyToken, notify.EnabledIn(db), logger)
+	notifyCtx, stopNotify := context.WithCancel(context.WithoutCancel(ctx))
+	notifyDone := make(chan struct{})
+	go func() { notifier.Run(notifyCtx); close(notifyDone) }()
+	defer func() { stopNotify(); <-notifyDone }()
+	if notifier.Configured() {
+		logger.Info("notifications: on (ntfy webhook)")
+	}
+	if vlt.Initialized() {
+		notifier.Notify(ctx, notify.Message{
+			Event: notify.Sealed,
+			Title: "BelayPoint started and is sealed",
+			Body:  "Scheduled maintenance is skipped until someone logs in (version " + buildinfo.Version + ").",
+		})
+	}
+
 	// Without restic, passwords cannot be checked and no jobs run; the
 	// interfaces stay nil (not a nil *restic.CLI inside an interface,
 	// which would not compare equal to nil: a Go pitfall with no C#
@@ -150,10 +171,18 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 		manager = jobs.New(jobs.Options{
 			Root: cfg.ReposDir, Runner: cli, Secrets: vlt, Store: db,
 			Logger: logger, Now: time.Now, MaxJobs: cfg.MaxJobs, LogDir: logDir,
+			Notifier: notifier,
 		})
 		manager.Run(ctx)
 		checker, jobRunner = cli, manager
-		sched := scheduler.New(db, manager, logger, cfg.Location, time.Now, nil)
+		skipped := func(repo, reason string) {
+			notifier.Notify(context.WithoutCancel(ctx), notify.Message{
+				Event: notify.Failed,
+				Title: "scheduled maintenance skipped: " + repo,
+				Body:  reason,
+			})
+		}
+		sched := scheduler.New(db, manager, logger, cfg.Location, time.Now, skipped)
 		if err := sched.Start(ctx); err != nil {
 			logger.Error("scheduler", "err", err)
 			return 1
@@ -190,32 +219,43 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 		OnReject: netguard.RejectLogger(logger, 10*time.Minute),
 	}
 
+	webOpts := web.Options{
+		Version:        buildinfo.Version,
+		CAPEM:          cert.CAPEM,
+		CAFingerprint:  cert.CAFingerprint,
+		Logger:         logger,
+		Vault:          vlt,
+		Sessions:       auth.NewSessions(cfg.SessionTTL, time.Now),
+		Limiter:        auth.NewLimiter(time.Now),
+		Audit:          auditor{db, logger},
+		AuditLog:       db,
+		Repos:          db,
+		Users:          users,
+		Scanner:        rescanner{ctx, scanner},
+		Restic:         checker,
+		Jobs:           jobRunner,
+		JobList:        db,
+		JobLogDir:      logDir,
+		Policies:       db,
+		Plans:          db,
+		Flags:          db,
+		Schedule:       schedule,
+		ReposDir:       cfg.ReposDir,
+		Location:       cfg.Location,
+		SetupCode:      setupCode,
+		Notifier:       notifier,
+		Settings:       db,
+		NotifyTarget:   notifyTarget(cfg.NotifyURL),
+		NotifyTokenSet: cfg.NotifyToken != "",
+	}
+	// "Needs attention" is checked in the background for notifications:
+	// first shortly after the start (discovery has run by then), then
+	// every few minutes.
+	attentionDone := make(chan struct{})
+	go func() { web.WatchAttention(ctx, webOpts, 2*time.Minute, 5*time.Minute); close(attentionDone) }()
+
 	srv := &http.Server{
-		Handler: web.New(web.Options{
-			Version:       buildinfo.Version,
-			CAPEM:         cert.CAPEM,
-			CAFingerprint: cert.CAFingerprint,
-			Logger:        logger,
-			Vault:         vlt,
-			Sessions:      auth.NewSessions(cfg.SessionTTL, time.Now),
-			Limiter:       auth.NewLimiter(time.Now),
-			Audit:         auditor{db, logger},
-			AuditLog:      db,
-			Repos:         db,
-			Users:         users,
-			Scanner:       rescanner{ctx, scanner},
-			Restic:        checker,
-			Jobs:          jobRunner,
-			JobList:       db,
-			JobLogDir:     logDir,
-			Policies:      db,
-			Plans:         db,
-			Flags:         db,
-			Schedule:      schedule,
-			ReposDir:      cfg.ReposDir,
-			Location:      cfg.Location,
-			SetupCode:     setupCode,
-		}),
+		Handler:           web.New(webOpts),
 		TLSConfig:         tlsConfig(cert),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       time.Minute,
@@ -253,8 +293,19 @@ func serve(ctx context.Context, getenv func(string) string, stderr io.Writer, re
 		manager.Wait()
 	}
 	scanner.Wait()
+	<-attentionDone // it reads the database, which is closed after this
 	logger.Info("stopped")
 	return 0
+}
+
+// notifyTarget is the webhook's scheme and host for display; the path
+// (the ntfy topic) can act as a secret and is left out.
+func notifyTarget(raw string) string {
+	u, err := url.Parse(raw)
+	if raw == "" || err != nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/…"
 }
 
 func logCert(logger *slog.Logger, cert tlscert.Result) {

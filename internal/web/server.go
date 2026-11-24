@@ -17,6 +17,7 @@ import (
 
 	"github.com/MB512/belaypoint/internal/auth"
 	"github.com/MB512/belaypoint/internal/netguard"
+	"github.com/MB512/belaypoint/internal/notify"
 	"github.com/MB512/belaypoint/internal/store"
 )
 
@@ -104,8 +105,16 @@ type Options struct {
 	Plans    Plans
 	// Flags stores the per-repository marks (archive, owner keeps the
 	// password).
-	Flags    RepoFlags
-	Schedule Schedule
+	Flags RepoFlags
+	// Notifier sends notifications; Settings keeps their switches and the
+	// last notified "Needs attention" state. Both may be nil.
+	Notifier Notifications
+	Settings notify.SettingStore
+	// NotifyTarget is the webhook's address without its path, for the
+	// Settings page; NotifyTokenSet says whether a token is configured.
+	NotifyTarget   string
+	NotifyTokenSet bool
+	Schedule       Schedule
 	// JobLogDir holds the job logs (<id>.log).
 	JobLogDir string
 	// ReposDir is the repository root (BELAYPOINT_REPOS_DIR).
@@ -176,6 +185,9 @@ func New(opts Options) http.Handler {
 		r.Get("/users/remove", s.confirmUser("remove"))
 		r.Post("/users/remove", s.removeUser)
 		r.Get("/storage", s.storagePage)
+		r.Get("/settings", s.settingsPage)
+		r.Post("/settings/notifications", s.setNotifications)
+		r.Post("/settings/notifications/test", s.testNotification)
 		r.Get("/audit", s.auditPage)
 		r.Post("/logout", s.logout)
 		r.Post("/seal", s.seal)
@@ -238,6 +250,8 @@ type page struct {
 	Maintenance *maintenanceData
 	// storage page
 	Storage *storageData
+	// settings page
+	Settings *settingsData
 }
 
 func (s *server) render(w http.ResponseWriter, status int, name string, p page) {
