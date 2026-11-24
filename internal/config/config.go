@@ -42,7 +42,9 @@ type Config struct {
 	JobLogRetention time.Duration
 	// NotifyURL is the webhook for notifications; empty disables them.
 	NotifyURL string
-	LogLevel  slog.Level
+	// NotifyToken is an optional ntfy access token (Authorization: Bearer).
+	NotifyToken string
+	LogLevel    slog.Level
 	// Location is the time zone of schedules and of times in the UI (TZ).
 	Location *time.Location
 }
@@ -60,6 +62,7 @@ const (
 	EnvLockWait        = "BELAYPOINT_LOCK_WAIT"
 	EnvSessionTTL      = "BELAYPOINT_SESSION_TTL"
 	EnvNotifyURL       = "BELAYPOINT_NOTIFY_URL"
+	EnvNotifyToken     = "BELAYPOINT_NOTIFY_TOKEN" //nolint:gosec // G101: variable name, not a credential
 	EnvJobLogRetention = "BELAYPOINT_JOB_LOG_RETENTION"
 	EnvLogLevel        = "BELAYPOINT_LOG_LEVEL"
 	EnvTZ              = "TZ"
@@ -145,6 +148,16 @@ func Load(getenv func(string) string) (Config, error) {
 			fail(EnvNotifyURL, errors.New("must be an http(s) URL"))
 		} else {
 			c.NotifyURL = v
+		}
+	}
+	if v := strings.TrimSpace(getenv(EnvNotifyToken)); v != "" {
+		switch {
+		case c.NotifyURL == "":
+			fail(EnvNotifyToken, errors.New("set without "+EnvNotifyURL))
+		case strings.ContainsAny(v, " \t\r\n"):
+			fail(EnvNotifyToken, errors.New("must not contain whitespace"))
+		default:
+			c.NotifyToken = v
 		}
 	}
 

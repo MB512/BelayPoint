@@ -45,6 +45,7 @@ func TestLoadValues(t *testing.T) {
 		EnvLogLevel:        "debug",
 		EnvTZ:              "Europe/Berlin",
 		EnvNotifyURL:       "https://ntfy.sh/topic",
+		EnvNotifyToken:     "tk_abc123",
 		EnvSessionTTL:      "30m",
 		EnvJobLogRetention: "0",
 	}))
@@ -62,6 +63,9 @@ func TestLoadValues(t *testing.T) {
 	}
 	if c.ReposDir != "/data/restic" || c.Htpasswd != "/data/restic/.htpasswd" {
 		t.Errorf("paths: %q %q", c.ReposDir, c.Htpasswd)
+	}
+	if c.NotifyURL != "https://ntfy.sh/topic" || c.NotifyToken != "tk_abc123" {
+		t.Errorf("notify: %q %q", c.NotifyURL, c.NotifyToken)
 	}
 	if c.MaxJobs != 2 || c.LockWait != time.Hour || c.LogLevel != slog.LevelDebug || c.Location.String() != "Europe/Berlin" {
 		t.Errorf("values: %+v", c)
@@ -84,6 +88,7 @@ func TestLoadErrors(t *testing.T) {
 		{"lock wait", EnvLockWait, "soon"},
 		{"session too short", EnvSessionTTL, "1m"},
 		{"notify scheme", EnvNotifyURL, "ftp://example.org"},
+		{"notify token without URL", EnvNotifyToken, "tk_abc"},
 		{"log level", EnvLogLevel, "loud"},
 		{"tz", EnvTZ, "Mars/Olympus"},
 		{"relative repos", EnvReposDir, "repos"},
