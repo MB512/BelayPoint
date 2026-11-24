@@ -104,7 +104,7 @@ networks:
 | `BELAYPOINT_MAX_JOBS` | maintenance jobs running at the same time across all repositories (disk load on the NAS), default `1` |
 | `BELAYPOINT_LOCK_WAIT` | how long a job waits for other locks to go away (`restic --retry-lock`), default `30m` |
 | `BELAYPOINT_SESSION_TTL` | session lifetime, default `8h` |
-| `BELAYPOINT_NOTIFY_URL` | webhook for notifications (ntfy-compatible: HTTP POST, text body, `Title` header); empty disables |
+| `BELAYPOINT_NOTIFY_URL` | reserved for notifications: parsed and validated (http(s) URL), but nothing is sent yet (see "Notifications") |
 | `BELAYPOINT_JOB_LOG_RETENTION` | delete job logs older than this (Go duration), default `2160h` (90 days) |
 | `BELAYPOINT_LOG_LEVEL` | `debug`, `info`, `warn`, `error` |
 | `TZ` | time zone of schedules and of all times in the UI; an unknown zone is a configuration error |
@@ -512,8 +512,8 @@ recorded as a job with state `skipped` and the reason.
   waited in the queue while the vault was sealed ends as `refused`. At most
   256 jobs wait in the queue.
 - A scheduled run that falls into a sealed period is recorded as
-  `skipped (sealed)`; a notification is sent once per sealed period, listing
-  the skipped runs.
+  `skipped (sealed)` and listed on the Jobs page; "Needs attention" on the
+  overview shows it as the repository's last maintenance run.
 - Sealing during a running job: the job finishes (restic already has the
   password), the secrets are not available for the next job.
 - restic's output goes to `/config/jobs/<id>.log` (mode 0600), with the
@@ -540,9 +540,11 @@ recorded as a job with state `skipped` and the reason.
 
 ## Notifications
 
-If `BELAYPOINT_NOTIFY_URL` is set: failed jobs, skipped runs while sealed,
-lock files older than 24 hours, certificate reissue. The NAS can open outbound
-connections, so services like ntfy work.
+BelayPoint sends no notifications yet. `BELAYPOINT_NOTIFY_URL` is parsed and
+validated at startup but not used. Failed or skipped runs, stale locks and
+the other problems are visible only in the UI ("Needs attention" on the
+overview, the Jobs page). Notifications by e-mail (and optionally other
+channels), each event switchable, are discussed in #12.
 
 ## Data model (SQLite)
 
