@@ -523,8 +523,12 @@ recorded as a job with state `skipped` and the reason.
   read live) and links them to the Run now tab, which shows them again and
   offers "Unlock" (`unlock`: restic removes locks whose process is gone on
   the same host, or that were not refreshed for 30 minutes) and "Remove all
-  locks…" (`unlock --remove-all` on a page that warns and needs the
-  repository name typed).
+  locks…" (`unlock --remove-all`). The button itself is not red: it only
+  leads to a confirmation page with the strongest warning (it can damage the
+  repository permanently and unrecoverably, and the damage may show only at
+  the next check or restore), the current lock files with the age of the
+  oldest (a recent lock usually means something is running) and the typed
+  repository name as confirmation.
 - States: `queued`, `running`, `succeeded`, `failed`, `refused`,
   `interrupted`, `skipped` (a scheduled run that could not start). The "Jobs" page lists them, newest first.
 - After a restart, jobs still marked as queued or running are set to

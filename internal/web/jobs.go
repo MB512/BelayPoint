@@ -217,7 +217,7 @@ func (s *server) unlockAllPage(w http.ResponseWriter, r *http.Request) {
 func (s *server) renderUnlockAll(w http.ResponseWriter, r *http.Request, status int, path, errMsg string) {
 	s.render(w, status, "unlock-all.html", page{
 		Title: "Remove all locks", CSRF: sessionFrom(r.Context()).CSRF, Error: errMsg,
-		RepoPassword: &repoPasswordData{Path: path},
+		RepoPassword: &repoPasswordData{Path: path, Locks: s.currentLocks(path)},
 	})
 }
 

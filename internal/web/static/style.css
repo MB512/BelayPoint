@@ -213,3 +213,7 @@ section.ownerkey h2 { margin-top: 0; font-size: 1.1rem; }
   .preview .tl { grid-template-columns: 1fr 4rem; }
   .preview .tl svg { grid-column: 1 / -1; }
 }
+/* The strongest warning: actions that can damage a repository for good. */
+section.danger-box { border: 2px solid var(--danger); background: var(--error-bg); border-radius: 8px; padding: .75rem 1.25rem; margin: 0 0 1.25rem; }
+section.danger-box h2 { margin: 0 0 .5rem; color: var(--danger); font-size: 1.25rem; }
+section.danger-box ul { margin: .5rem 0 0; padding-left: 1.25rem; }

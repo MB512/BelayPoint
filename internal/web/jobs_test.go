@@ -137,8 +137,16 @@ func TestUnlock(t *testing.T) {
 		t.Error("refused unlock not shown on the repository page")
 	}
 	e.jobs.err = nil
-	if body := getWithCookie(e.h, "/repos/unlock-all?repo=alice/main", cookie).Body.String(); !strings.Contains(body, `href="/repos/view?repo=alice%2fmain">Cancel`) {
-		t.Error("unlock-all page does not return to the repository page")
+	body := getWithCookie(e.h, "/repos/unlock-all?repo=alice/main", cookie).Body.String()
+	for _, want := range []string{`href="/repos/view?repo=alice%2fmain">Cancel`, "This can damage the repository permanently", "cannot be recovered", "Locks now: none"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("unlock-all page lacks %q", want)
+		}
+	}
+	// The link on the Run now tab only leads to that page: not red.
+	e.vault.secrets = []string{vault.RepoSecret("alice/main")}
+	if run := getWithCookie(e.h, "/repos/view?repo=alice/main&tab=run", cookie).Body.String(); !strings.Contains(run, `<a class="button" href="/repos/unlock-all?repo=alice%2fmain"`) {
+		t.Error("Remove all locks… is not a plain button")
 	}
 }
 

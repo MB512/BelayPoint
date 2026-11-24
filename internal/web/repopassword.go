@@ -30,6 +30,8 @@ type repoPasswordData struct {
 	Stored bool
 	// Available is false when restic is not installed.
 	Available bool
+	// Locks are the current lock files (unlock-all page).
+	Locks *repoRow
 }
 
 // knownRepo resolves path to its directory, only for a repository that

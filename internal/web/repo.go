@@ -114,8 +114,7 @@ func (s *server) renderRepo(w http.ResponseWriter, r *http.Request, status int, 
 		d.Tab = tabRun
 	}
 	if d.Tab == tabRun {
-		d.Locks = &repoRow{Path: d.Path}
-		s.addLocks(d.Locks, time.Now())
+		d.Locks = s.currentLocks(d.Path)
 	}
 	if d.Plan == nil {
 		plan, err := s.planFor(r.Context(), d.Path)
@@ -260,6 +259,13 @@ func (s *server) setPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Audit.Audit(r.Context(), "policy changed", path+": "+details+", "+remote(r))
 	redirect(w, r, "/repos/view?repo="+url.QueryEscape(path)+"&tab="+tabRetention)
+}
+
+// currentLocks reads the repository's lock files live.
+func (s *server) currentLocks(path string) *repoRow {
+	row := &repoRow{Path: path}
+	s.addLocks(row, time.Now())
+	return row
 }
 
 // setArchived marks a repository as an archive (archived=yes) or as

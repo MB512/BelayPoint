@@ -62,7 +62,7 @@ through the rest-server either. To clean up, the owner needs to share the passwo
 <form method="post" action="/repos/unlock"><input type="hidden" name="csrf_token" value="{{$.CSRF}}">
 <input type="hidden" name="repo" value="{{.Path}}">
 <button type="submit">Unlock</button></form>
-<a class="danger" href="/repos/unlock-all?repo={{.Path}}" title="restic unlock --remove-all">Remove all locks…</a>
+<a class="button" href="/repos/unlock-all?repo={{.Path}}" title="restic unlock --remove-all: the next page explains the risk and asks for confirmation">Remove all locks…</a>
 </div>
 </section>
 
