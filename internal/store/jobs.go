@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -73,26 +74,16 @@ func (s *Store) ListJobs(ctx context.Context, limit int, before int64) ([]Job, e
 		before = 1<<63 - 1
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, repo, type, trigger, state, queued, started, finished, summary, error
-		 FROM jobs WHERE id < ? ORDER BY id DESC LIMIT ?`, before, limit)
+		`SELECT `+jobColumns+` FROM jobs WHERE id < ? ORDER BY id DESC LIMIT ?`, before, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing jobs: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	var out []Job
 	for rows.Next() {
-		var j Job
-		var queued int64
-		var started, finished sql.NullInt64
-		if err := rows.Scan(&j.ID, &j.Repo, &j.Type, &j.Trigger, &j.State, &queued, &started, &finished, &j.Summary, &j.Error); err != nil {
+		j, err := scanJob(rows)
+		if err != nil {
 			return nil, fmt.Errorf("listing jobs: %w", err)
-		}
-		j.Queued = time.UnixMilli(queued)
-		if started.Valid {
-			j.Started = time.UnixMilli(started.Int64)
-		}
-		if finished.Valid {
-			j.Finished = time.UnixMilli(finished.Int64)
 		}
 		out = append(out, j)
 	}
@@ -100,6 +91,42 @@ func (s *Store) ListJobs(ctx context.Context, limit int, before int64) ([]Job, e
 		return nil, fmt.Errorf("listing jobs: %w", err)
 	}
 	return out, nil
+}
+
+// Job returns one job; ErrNotFound if there is none with this id.
+func (s *Store) Job(ctx context.Context, id int64) (Job, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+jobColumns+` FROM jobs WHERE id = ?`, id)
+	j, err := scanJob(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Job{}, fmt.Errorf("job %d: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return Job{}, fmt.Errorf("reading job %d: %w", id, err)
+	}
+	return j, nil
+}
+
+// jobColumns are the columns scanJob reads, in its order.
+const jobColumns = `id, repo, type, trigger, state, queued, started, finished, summary, error`
+
+// scanJob reads one row of jobColumns. *sql.Row and *sql.Rows both have
+// this Scan method; the small interface accepts either.
+func scanJob(row interface{ Scan(dest ...any) error }) (Job, error) {
+	var j Job
+	var queued int64
+	var started, finished sql.NullInt64
+	if err := row.Scan(&j.ID, &j.Repo, &j.Type, &j.Trigger, &j.State, &queued, &started, &finished, &j.Summary, &j.Error); err != nil {
+		return Job{}, err
+	}
+	j.Queued = time.UnixMilli(queued)
+	if started.Valid {
+		j.Started = time.UnixMilli(started.Int64)
+	}
+	if finished.Valid {
+		j.Finished = time.UnixMilli(finished.Int64)
+	}
+	return j, nil
 }
 
 // SetRepoSnapshots stores the snapshot summary of a repository; newest is

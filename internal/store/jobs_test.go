@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -44,6 +45,12 @@ func TestJobs(t *testing.T) {
 	}
 	if page, _ := s.ListJobs(ctx, 10, b); len(page) != 1 || page[0].ID != a {
 		t.Errorf("page: %+v", page)
+	}
+	if one, err := s.Job(ctx, a); err != nil || one != j {
+		t.Errorf("Job(%d) = %+v, %v; want %+v", a, one, err, j)
+	}
+	if _, err := s.Job(ctx, c+100); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown job: %v", err)
 	}
 }
 
