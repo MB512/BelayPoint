@@ -1,0 +1,68 @@
+{{template "top" .}}
+{{with .Storage}}
+{{with .Volume}}
+<p class="hero"><strong>{{.Free}} free</strong> <span class="muted">of {{.Total}} · {{.Percent}} used</span></p>
+{{end}}
+
+{{if .Parts}}
+<section class="chart" aria-label="Volume per user">
+<h2>{{if .Volume}}Volume per user{{else}}Backups per user{{end}}</h2>
+<svg class="seg" width="100%" height="28" role="img" aria-label="{{range $i, $p := .Parts}}{{if $i}}, {{end}}{{.Name}} {{.Size}} ({{.Share}}){{end}}">
+{{range .Parts}}<g class="{{.Class}}"><title>{{.Name}}: {{.Size}} ({{.Share}}){{if .Repos}}, {{.Repos}} repositories{{end}}</title>
+<rect x="{{.X}}%" y="0" width="{{.W}}%" height="28" rx="4"></rect>
+{{if .Label}}<text x="{{.X}}%" dx="8" y="19">{{.Share}}</text>{{end}}</g>
+{{end}}</svg>
+<table class="legend">
+<thead><tr><th></th><th>{{if .Volume}}Part{{else}}User{{end}}</th><th class="num">Repositories</th><th class="num">Size</th><th class="num">Share</th></tr></thead>
+<tbody>
+{{range .Parts}}<tr>
+<td class="swatch"><svg width="12" height="12" aria-hidden="true"><rect class="{{.Class}}" width="12" height="12" rx="3"></rect></svg></td>
+<td>{{.Name}}</td>
+<td class="num">{{if .Repos}}{{.Repos}}{{end}}</td>
+<td class="num nowrap">{{.Size}}</td>
+<td class="num nowrap">{{.Share}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+<p class="muted">{{if .Volume}}"other data" is the rest of the volume that holds the repositories. {{end}}Backups total {{.Backups}}.
+{{if .Unmeasured}}{{.Unmeasured}} {{if eq .Unmeasured 1}}repository is{{else}}repositories are{{end}} not measured yet and not included.{{end}}</p>
+</section>
+{{end}}
+
+{{if .Repos}}
+<section class="chart" aria-label="Repositories by size">
+<h2>Repositories by size</h2>
+<ol class="ranked">
+{{range .Repos}}<li>
+<a href="/repos/view?repo={{.Path}}"><code>{{.Path}}</code></a>
+{{if .Size}}<svg width="100%" height="12" role="img" aria-label="{{.Path}}: {{.Size}}, {{.Share}} of the backups"><title>{{.Path}} ({{.Owner}}): {{.Size}}, {{.Share}} of the backups</title>
+<rect class="{{.Class}}" x="0" y="0" width="{{.W}}%" height="12" rx="3"></rect></svg>
+<span class="num nowrap">{{.Size}} <span class="muted">{{.Share}}</span></span>
+{{else}}<span></span><span class="muted">not measured yet</span>{{end}}
+</li>
+{{end}}
+</ol>
+</section>
+
+<details>
+<summary>Details</summary>
+<table>
+<thead><tr><th>Repository</th><th>User</th><th class="num">Size</th><th class="num">Share</th><th class="num">Files</th><th>Measured</th></tr></thead>
+<tbody>
+{{range .Repos}}<tr><td><code>{{.Path}}</code></td><td>{{.Owner}}</td><td class="num nowrap">{{.Size}}</td><td class="num nowrap">{{.Share}}</td><td class="num">{{.Files}}</td><td class="nowrap">{{.Measured}}</td></tr>
+{{end}}
+</tbody>
+</table>
+</details>
+{{else}}
+<p>No repositories found.</p>
+{{end}}
+
+<form method="post" action="/repos/rescan" class="buttons">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="from" value="storage">
+<button type="submit" class="secondary" {{if .Scanning}}disabled{{end}}>{{if .Scanning}}Measuring…{{else}}Measure again{{end}}</button>
+<small class="muted">Sizes are measured in the background at start and on request.</small>
+</form>
+{{end}}
+{{template "bottom" .}}

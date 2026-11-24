@@ -2,12 +2,21 @@
 :root {
   --fg: #1d232a; --muted: #5b6672; --bg: #f6f7f9; --card: #fff; --line: #d8dde3;
   --accent: #1f6f5c; --danger: #b3261e; --warn-bg: #fff6e0; --error-bg: #fde8e7;
+  /* Chart colours (one fixed slot per user, never cycled), validated for
+     colour-vision deficiency against the card surface in both modes. */
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+  --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948;
+  --other-users: #6b7580; --other-data: #a3acb6; --free: #e6e9ed;
+  --ink-dark: #0b0b0b; --ink-light: #fff;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --fg: #e3e7eb; --muted: #9aa5b1; --bg: #15191d; --card: #1d2329; --line: #333c45;
     --accent: #4fb89c; --danger: #f2706a; --warn-bg: #3a3120; --error-bg: #3d2322;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --series-5: #d55181; --series-6: #0ca30c; --series-7: #9085e9; --series-8: #e66767;
+    --other-users: #8a949e; --other-data: #5d6771; --free: #2b333b;
   }
 }
 * { box-sizing: border-box; }
@@ -123,3 +132,35 @@ label.inline { display: inline-flex; align-items: center; gap: .4rem; font-weigh
 input.short { width: 5rem; }
 button.secondary { background: none; color: var(--accent); border: 1px solid var(--accent); }
 .notice { padding: .75rem 1rem; border-radius: 6px; border-left: 4px solid var(--accent); background: var(--card); }
+/* Storage page. Charts are inline SVG: widths are SVG attributes because
+   the CSP forbids style attributes. Colours come from these classes. */
+.hero { font-size: 1.1rem; margin: 0 0 1.5rem; }
+.hero strong { display: block; font-size: 3rem; font-weight: 600; line-height: 1.1; }
+section.chart { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.25rem; margin: 0 0 1.5rem; }
+section.chart h2 { margin-top: 0; font-size: 1.1rem; }
+.series-1 { fill: var(--series-1); } .series-2 { fill: var(--series-2); }
+.series-3 { fill: var(--series-3); } .series-4 { fill: var(--series-4); }
+.series-5 { fill: var(--series-5); } .series-6 { fill: var(--series-6); }
+.series-7 { fill: var(--series-7); } .series-8 { fill: var(--series-8); }
+.other-users { fill: var(--other-users); } .other-data { fill: var(--other-data); } .free { fill: var(--free); }
+/* Segmented bar: a 2px card-coloured outline separates the blocks. */
+svg.seg { display: block; margin: .5rem 0 1rem; overflow: visible; }
+svg.seg rect { stroke: var(--card); stroke-width: 2px; }
+svg.seg text { font-size: .8rem; font-weight: 600; fill: var(--ink-dark); }
+svg.seg .series-1 text, svg.seg .series-6 text, svg.seg .series-7 text, svg.seg .other-users text { fill: var(--ink-light); }
+svg.seg .free text { fill: var(--fg); }
+svg.seg g:hover rect { opacity: .85; }
+table.legend { width: auto; background: none; }
+table.legend td, table.legend th { padding: .2rem .75rem .2rem 0; border: 0; }
+td.swatch { width: 1rem; }
+/* Ranked bars: name, bar, figure per row; the bar drops below the name on
+   narrow screens. */
+ol.ranked { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: max-content 1fr max-content; gap: .35rem 1rem; align-items: center; }
+ol.ranked li { display: contents; }
+ol.ranked svg { display: block; }
+ol.ranked .num { text-align: right; }
+@media (max-width: 40rem) {
+  ol.ranked { grid-template-columns: 1fr max-content; }
+  ol.ranked svg { grid-column: 1 / -1; }
+}
+section.chart + details, details + form.buttons { margin-top: 1rem; }

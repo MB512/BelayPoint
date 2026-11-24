@@ -262,6 +262,28 @@ Below the repository table, a per-user summary (the user is the first path compo
 total. Missing repositories are not counted; repositories not measured yet
 are counted but marked, since their size is not in the sum.
 
+### Storage page
+
+The Storage page (#7) shows the free space of the volume as the leading
+figure, then the volume as one segmented bar: a block per user, "other data"
+(used space of the volume minus the backups) and free space, with a legend
+table (repositories, size, share). Below, the repositories as bars ranked by
+size, scaled to the largest, and a collapsed details table (files, measured).
+"Measure again" starts the background measurement and returns to the page.
+
+- A user keeps one colour everywhere: users get the categorical slots in
+  alphabetical order (not by size, so a colour never moves when sizes
+  change). Eight slots; further users are folded into "other users"
+  instead of generating colours that cannot be told apart. The palette was
+  checked for colour-vision deficiency against the card surface in light
+  and dark mode; every colour is also named in the legend.
+- The charts are inline SVG rendered on the server: no JavaScript, and
+  widths are SVG attributes because the CSP forbids `style` attributes.
+  Each block and bar has a tooltip (`<title>`) and an accessible name.
+- If the backups are larger than the volume's used space (quota, other
+  file system reporting), the whole is at least the backups, so the bar
+  never exceeds 100 %.
+
 ## Users (`.htpasswd`)
 
 - Listing, adding, resetting the password of, and removing users. Reset and

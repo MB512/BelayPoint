@@ -167,6 +167,7 @@ func New(opts Options) http.Handler {
 		r.Post("/users/reset", s.resetUser)
 		r.Get("/users/remove", s.confirmUser("remove"))
 		r.Post("/users/remove", s.removeUser)
+		r.Get("/storage", s.storagePage)
 		r.Get("/audit", s.auditPage)
 		r.Post("/logout", s.logout)
 		r.Post("/seal", s.seal)
@@ -227,6 +228,8 @@ type page struct {
 	// repository page
 	Repo        *repoData
 	Maintenance *maintenanceData
+	// storage page
+	Storage *storageData
 }
 
 func (s *server) render(w http.ResponseWriter, status int, name string, p page) {

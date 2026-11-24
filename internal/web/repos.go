@@ -193,9 +193,14 @@ func (s *server) rescan(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	toStorage := f.get("from") == "storage"
 	f.wipe()
 	if s.Scanner.Rescan() {
 		s.Audit.Audit(r.Context(), "rescan", remote(r))
+	}
+	if toStorage {
+		redirect(w, r, "/storage")
+		return
 	}
 	redirect(w, r, "/")
 }
