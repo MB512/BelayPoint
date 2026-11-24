@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -86,7 +87,7 @@ func (s *server) refreshSnapshots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path := f.get("repo"); path != "" {
-		s.submitJob(w, r, path, jobs.Snapshots)
+		s.submitJob(w, r, path, jobs.Snapshots, false)
 		return
 	}
 	list, err := s.Repos.ListRepos(r.Context())
@@ -113,11 +114,12 @@ func (s *server) refreshSnapshots(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, "/")
 }
 
-// submitJob queues one job for a known repository, audits it and returns
-// to the overview (errors are shown there).
-func (s *server) submitJob(w http.ResponseWriter, r *http.Request, path string, typ jobs.Type) {
+// submitJob queues one job for a known repository and audits it. toRepo
+// (the job was started on the repository page) returns to its Run now tab,
+// otherwise to the overview; errors are shown there too.
+func (s *server) submitJob(w http.ResponseWriter, r *http.Request, path string, typ jobs.Type, toRepo bool) {
 	if s.Jobs == nil {
-		s.renderHome(w, r, http.StatusServiceUnavailable, "restic is not available; see the container log.")
+		s.jobFailed(w, r, path, toRepo, http.StatusServiceUnavailable, "restic is not available; see the container log.")
 		return
 	}
 	if _, ok := s.knownRepo(r.Context(), path); !ok {
@@ -126,12 +128,40 @@ func (s *server) submitJob(w http.ResponseWriter, r *http.Request, path string, 
 	}
 	id, err := s.Jobs.Submit(r.Context(), path, typ, jobs.Manual)
 	if err != nil {
-		s.renderHome(w, r, jobErrorStatus(err), string(typ)+" for "+path+": "+err.Error())
+		s.jobFailed(w, r, path, toRepo, jobErrorStatus(err), string(typ)+" for "+path+": "+err.Error())
 		return
 	}
 	s.Audit.Audit(r.Context(), "job submitted", fmt.Sprintf("%s, %s, job %d, %s", typ, path, id, remote(r)))
-	redirect(w, r, "/")
+	s.jobSubmitted(w, r, path, id, toRepo)
 }
+
+// jobSubmitted redirects after a job was queued: to the Run now tab with
+// the job id (shown as "Job n was queued"), or to the overview.
+func (s *server) jobSubmitted(w http.ResponseWriter, r *http.Request, path string, id int64, toRepo bool) {
+	if !toRepo {
+		redirect(w, r, "/")
+		return
+	}
+	redirect(w, r, "/repos/view?repo="+url.QueryEscape(path)+"&tab="+tabRun+"&job="+strconv.FormatInt(id, 10))
+}
+
+// jobFailed shows why a job was not queued, on the page it came from.
+func (s *server) jobFailed(w http.ResponseWriter, r *http.Request, path string, toRepo bool, status int, msg string) {
+	if !toRepo {
+		s.renderHome(w, r, status, msg)
+		return
+	}
+	d, err := s.repoData(r.Context(), path)
+	if err != nil {
+		s.Logger.Error("reading repository settings", "repo", path, "err", err)
+	}
+	d.Tab = tabRun
+	s.renderRepo(w, r, status, d, msg)
+}
+
+// fromRepo reports whether a form was sent from the repository page
+// (hidden field from=repo).
+func fromRepo(f form) bool { return f.get("from") == "repo" }
 
 // submitCheck queues a manual check. The two optional fields subset_n and
 // subset_t ("read part n of t") become --read-data-subset n/t; both empty
@@ -139,7 +169,7 @@ func (s *server) submitJob(w http.ResponseWriter, r *http.Request, path string, 
 func (s *server) submitCheck(w http.ResponseWriter, r *http.Request, f form) {
 	path := f.get("repo")
 	if s.Jobs == nil {
-		s.renderHome(w, r, http.StatusServiceUnavailable, "restic is not available; see the container log.")
+		s.jobFailed(w, r, path, true, http.StatusServiceUnavailable, "restic is not available; see the container log.")
 		return
 	}
 	if _, ok := s.knownRepo(r.Context(), path); !ok {
@@ -151,13 +181,13 @@ func (s *server) submitCheck(w http.ResponseWriter, r *http.Request, f form) {
 	if n != "" || t != "" {
 		subset = n + "/" + t
 		if err := restic.ValidSubset(subset); err != nil {
-			s.renderHome(w, r, http.StatusBadRequest, "check for "+path+": read part n of t needs 1 ≤ n ≤ t ≤ "+strconv.Itoa(restic.MaxSubsetT)+".")
+			s.jobFailed(w, r, path, true, http.StatusBadRequest, "check for "+path+": read part n of t needs 1 ≤ n ≤ t ≤ "+strconv.Itoa(restic.MaxSubsetT)+".")
 			return
 		}
 	}
 	id, err := s.Jobs.SubmitCheck(r.Context(), path, subset)
 	if err != nil {
-		s.renderHome(w, r, jobErrorStatus(err), "check for "+path+": "+err.Error())
+		s.jobFailed(w, r, path, true, jobErrorStatus(err), "check for "+path+": "+err.Error())
 		return
 	}
 	details := "check"
@@ -165,7 +195,7 @@ func (s *server) submitCheck(w http.ResponseWriter, r *http.Request, f form) {
 		details += " (data subset " + subset + ")"
 	}
 	s.Audit.Audit(r.Context(), "job submitted", fmt.Sprintf("%s, %s, job %d, %s", details, path, id, remote(r)))
-	redirect(w, r, "/")
+	s.jobSubmitted(w, r, path, id, true)
 }
 
 // unlock removes stale locks (restic decides what is stale).
@@ -175,7 +205,7 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.wipe()
-	s.submitJob(w, r, f.get("repo"), jobs.Unlock)
+	s.submitJob(w, r, f.get("repo"), jobs.Unlock, fromRepo(f))
 }
 
 func (s *server) unlockAllPage(w http.ResponseWriter, r *http.Request) {
@@ -184,13 +214,13 @@ func (s *server) unlockAllPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.renderUnlockAll(w, r, http.StatusOK, path, "")
+	s.renderUnlockAll(w, r, http.StatusOK, path, r.URL.Query().Get("from") == "repo", "")
 }
 
-func (s *server) renderUnlockAll(w http.ResponseWriter, r *http.Request, status int, path, errMsg string) {
+func (s *server) renderUnlockAll(w http.ResponseWriter, r *http.Request, status int, path string, toRepo bool, errMsg string) {
 	s.render(w, status, "unlock-all.html", page{
 		Title: "Remove all locks", CSRF: sessionFrom(r.Context()).CSRF, Error: errMsg,
-		RepoPassword: &repoPasswordData{Path: path},
+		RepoPassword: &repoPasswordData{Path: path, FromRepo: toRepo},
 	})
 }
 
@@ -208,10 +238,10 @@ func (s *server) unlockAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if f.get("confirm_name") != path {
-		s.renderUnlockAll(w, r, http.StatusBadRequest, path, "The typed name does not match the repository.")
+		s.renderUnlockAll(w, r, http.StatusBadRequest, path, fromRepo(f), "The typed name does not match the repository.")
 		return
 	}
-	s.submitJob(w, r, path, jobs.UnlockAll)
+	s.submitJob(w, r, path, jobs.UnlockAll, fromRepo(f))
 }
 
 // jobLog shows the log file of a job (the last maxLogBytes of it).

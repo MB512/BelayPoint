@@ -155,13 +155,22 @@ func TestMaintenance(t *testing.T) {
 	if w := post(e.h, "/repos/maintenance", cookie, v("unlock-all", "yes"), nil); w.Code != http.StatusNotFound {
 		t.Errorf("unlock-all through maintenance: %d", w.Code)
 	}
-	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, v("forget", "yes"), nil), "/")
-	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, v("prune", "yes"), nil), "/")
-	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, v("check", ""), nil), "/")
+	// Jobs return to the Run now tab, which names the queued job.
+	back := "/repos/view?repo=alice%2Fmain&tab=run&job="
+	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, v("forget", "yes"), nil), back+"1")
+	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, v("prune", "yes"), nil), back+"2")
+	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, v("check", ""), nil), back+"3")
 	withSubset := v("check", "")
 	withSubset.Set("subset_n", "2")
 	withSubset.Set("subset_t", "7")
-	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, withSubset, nil), "/")
+	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, withSubset, nil), back+"4")
+	e.vault.secrets = []string{vault.RepoSecret("alice/main")}
+	if body := getWithCookie(e.h, "/repos/view?repo=alice/main&tab=run&job=4", cookie).Body.String(); !strings.Contains(body, "Job 4 was queued") || !strings.Contains(body, `href="/jobs/4/log"`) {
+		t.Error("run tab does not name the queued job")
+	}
+	if body := getWithCookie(e.h, "/repos/view?repo=alice/main&tab=run&job=x", cookie).Body.String(); strings.Contains(body, "was queued") {
+		t.Error("invalid job id shown")
+	}
 	for _, bad := range [][2]string{{"8", "7"}, {"0", "7"}, {"1", ""}, {"", "7"}, {"1", "400"}, {"x", "7"}} {
 		b := v("check", "")
 		b.Set("subset_n", bad[0])
@@ -173,6 +182,12 @@ func TestMaintenance(t *testing.T) {
 	want := []string{"forget alice/main", "prune alice/main", "check alice/main", "check alice/main 2/7"}
 	if strings.Join(e.jobs.submitted, ",") != strings.Join(want, ",") {
 		t.Errorf("submitted %v", e.jobs.submitted)
+	}
+	// A refused job is reported on the repository page.
+	e.jobs.err = jobs.ErrBusy
+	w = post(e.h, "/repos/maintenance", cookie, v("prune", "yes"), nil)
+	if body := w.Body.String(); w.Code != http.StatusConflict || !strings.Contains(body, "prune for alice/main: a job for this repository is already queued or running") || !strings.Contains(body, `tab=run" aria-current="page"`) {
+		t.Errorf("refused job: %d", w.Code)
 	}
 }
 

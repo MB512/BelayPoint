@@ -125,6 +125,15 @@ func TestUnlock(t *testing.T) {
 	if !slices.Equal(e.jobs.submitted, []string{"unlock alice/main", "unlock-all alice/main"}) || !e.audit.has("job submitted") {
 		t.Errorf("submitted %v", e.jobs.submitted)
 	}
+
+	// Started on the repository page (from=repo), both return there.
+	back := "/repos/view?repo=alice%2Fmain&tab=run&job="
+	wantRedirect(t, post(e.h, "/repos/unlock", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "from": {"repo"}}, nil), back+"3")
+	body := getWithCookie(e.h, "/repos/unlock-all?repo=alice/main&from=repo", cookie).Body.String()
+	if !strings.Contains(body, `name="from" value="repo"`) || !strings.Contains(body, `href="/repos/view?repo=alice%2fmain">Cancel`) {
+		t.Error("unlock-all page from the repository page does not return there")
+	}
+	wantRedirect(t, post(e.h, "/repos/unlock-all", cookie, url.Values{"csrf_token": {csrf}, "repo": {"alice/main"}, "confirm_name": {"alice/main"}, "from": {"repo"}}, nil), back+"4")
 }
 
 func TestJobLogPage(t *testing.T) {

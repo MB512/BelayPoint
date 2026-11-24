@@ -122,3 +122,4 @@ section.action p { margin: .25rem 0 .75rem; }
 label.inline { display: inline-flex; align-items: center; gap: .4rem; font-weight: 400; }
 input.short { width: 5rem; }
 button.secondary { background: none; color: var(--accent); border: 1px solid var(--accent); }
+.notice { padding: .75rem 1rem; border-radius: 6px; border-left: 4px solid var(--accent); background: var(--card); }

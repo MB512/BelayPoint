@@ -367,7 +367,10 @@ and whether the policy is the default stay above the tabs.
 
 The Run now tab has one block per action: "Unlock" (stale locks; "Remove all
 locks…" leads to the typed confirmation of `unlock --remove-all`),
-"Forget…", "Prune…" and "Check". It needs the repository password. forget and
+"Forget…", "Prune…" and "Check". It needs the repository password. After a
+job was queued (or refused) the browser returns to the Run now tab, which
+names the queued job and links its log; jobs started on the overview return
+to the overview. forget and
 prune open a confirmation page and need a ticked checkbox; check runs
 directly. The forget confirmation page runs the dry-run with the saved policy
 (like "Preview these values") and shows what would be removed; if the dry-run

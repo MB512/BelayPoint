@@ -9,10 +9,11 @@ it was created on this machine). For older locks, "Remove stale locks" on the ov
 <form method="post" action="/repos/unlock-all" class="stack">
 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
 <input type="hidden" name="repo" value="{{.Path}}">
+{{if .FromRepo}}<input type="hidden" name="from" value="repo">{{end}}
 <label>Type the repository name <code>{{.Path}}</code> to confirm
 <input type="text" name="confirm_name" autocomplete="off" required></label>
 <button type="submit" class="danger">Remove all locks</button>
 </form>
-<p><a href="/">Cancel</a></p>
+<p><a href="{{if .FromRepo}}/repos/view?repo={{.Path}}{{else}}/{{end}}">Cancel</a></p>
 {{end}}
 {{template "bottom" .}}
