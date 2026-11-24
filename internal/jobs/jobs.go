@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -97,14 +98,15 @@ type Store interface {
 
 // Manager queues and runs jobs. Create it with New, then call Run once.
 type Manager struct {
-	root    string
-	runner  restic.Runner
-	secrets Secrets
-	store   Store
-	logger  *slog.Logger
-	now     func() time.Time
-	workers int
-	logDir  string
+	root     string
+	runner   restic.Runner
+	secrets  Secrets
+	store    Store
+	logger   *slog.Logger
+	now      func() time.Time
+	workers  int
+	logDir   string
+	notifier Notifier
 
 	queue chan task
 	wg    sync.WaitGroup
@@ -136,13 +138,15 @@ type Options struct {
 	MaxJobs int
 	// LogDir receives one log file per job (<id>.log).
 	LogDir string
+	// Notifier receives the result of maintenance jobs; may be nil.
+	Notifier Notifier
 }
 
 // New returns a Manager; jobs run only after Run was called.
 func New(o Options) *Manager {
 	return &Manager{
 		root: o.Root, runner: o.Runner, secrets: o.Secrets, store: o.Store, logger: o.Logger,
-		now: o.Now, workers: max(o.MaxJobs, 1), logDir: o.LogDir,
+		now: o.Now, workers: max(o.MaxJobs, 1), logDir: o.LogDir, notifier: o.Notifier,
 		queue: make(chan task, queueSize),
 		busy:  map[string]int64{},
 	}
@@ -288,7 +292,9 @@ func (m *Manager) run(ctx context.Context, t task) {
 	// store is closed only after Wait.
 	record := context.WithoutCancel(ctx)
 	log := m.logger.With("job", t.id, "type", t.typ, "repo", t.repo)
+	started := m.now()
 	finish := func(state, summary string, err error) {
+		m.notifyResult(record, t, state, summary, err, m.now().Sub(started))
 		var errText string
 		if err != nil {
 			errText = err.Error()
@@ -408,13 +414,21 @@ func (m *Manager) forget(ctx, record context.Context, repo, dir string, pw []byt
 }
 
 func (m *Manager) prune(ctx context.Context, dir string, pw []byte, maxUnused string, jl *jobLog) (string, error) {
-	if err := m.runner.Prune(ctx, dir, pw, maxUnused, jl); err != nil {
+	var stats pruneStats
+	if err := m.runner.Prune(ctx, dir, pw, maxUnused, io.MultiWriter(jl, &stats)); err != nil {
 		return "", err
 	}
-	if maxUnused != restic.DefaultMaxUnused {
-		return "pruned (max unused " + maxUnused + ")", nil
+	summary := "pruned"
+	if stats.freed != "" {
+		summary += ", freed " + stats.freed
+		if stats.remaining != "" {
+			summary += ", " + stats.remaining + " remaining"
+		}
 	}
-	return "pruned", nil
+	if maxUnused != restic.DefaultMaxUnused {
+		summary += " (max unused " + maxUnused + ")"
+	}
+	return summary, nil
 }
 
 func (m *Manager) check(ctx context.Context, dir string, pw []byte, subset string, jl *jobLog) (string, error) {

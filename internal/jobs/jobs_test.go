@@ -9,11 +9,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/MB512/belaypoint/internal/notify"
 	"github.com/MB512/belaypoint/internal/restic"
 	"github.com/MB512/belaypoint/internal/store"
 	"github.com/MB512/belaypoint/internal/vault"
@@ -97,6 +99,8 @@ func (f *fakeRunner) Forget(_ context.Context, _ string, pw []byte, p restic.Pol
 
 func (f *fakeRunner) Prune(_ context.Context, _ string, _ []byte, maxUnused string, log io.Writer) error {
 	fmt.Fprintf(log, "prune --max-unused %s\n", maxUnused)
+	// restic's statistics, as prune prints them (picked up for the summary).
+	fmt.Fprint(log, "to repack:            20 blobs / 1.955 MiB\ntotal prune:          62 blobs / 20.123 KiB\nremaining:            32 blobs / 8.132 MiB\n")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.steps = append(f.steps, "prune")
@@ -228,11 +232,37 @@ func (s *fakeStore) job(id int64) jobRow {
 }
 
 type env struct {
-	m       *Manager
-	secrets *fakeSecrets
-	runner  *fakeRunner
-	store   *fakeStore
-	cancel  context.CancelFunc
+	m        *Manager
+	secrets  *fakeSecrets
+	runner   *fakeRunner
+	store    *fakeStore
+	notifier *fakeNotifier
+	cancel   context.CancelFunc
+}
+
+// fakeNotifier records notifications; events in off are switched off.
+type fakeNotifier struct {
+	mu   sync.Mutex
+	sent []notify.Message
+	off  map[notify.Event]bool
+}
+
+func (f *fakeNotifier) Notify(_ context.Context, m notify.Message) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sent = append(f.sent, m)
+}
+
+func (f *fakeNotifier) Enabled(_ context.Context, e notify.Event) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.off[e]
+}
+
+func (f *fakeNotifier) messages() []notify.Message {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.sent)
 }
 
 func newEnv(t *testing.T, block bool, maxJobs int) *env {
@@ -249,13 +279,14 @@ func newEnv(t *testing.T, block bool, maxJobs int) *env {
 			vault.RepoSecret("bob/main"):   []byte("pw-bob"),
 			vault.RepoSecret("carol/main"): []byte("pw-carol"),
 		}},
-		runner: newRunner(block),
-		store:  newStore(),
+		runner:   newRunner(block),
+		store:    newStore(),
+		notifier: &fakeNotifier{off: map[notify.Event]bool{}},
 	}
 	e.m = New(Options{
 		Root: root, Runner: e.runner, Secrets: e.secrets, Store: e.store,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now, MaxJobs: maxJobs,
-		LogDir: t.TempDir(),
+		LogDir: t.TempDir(), Notifier: e.notifier,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	e.cancel = cancel
@@ -488,7 +519,7 @@ func TestMaintenanceJobs(t *testing.T) {
 	}{
 		{"bob/main", Forget, "3 snapshots removed, 2 kept", "forget --keep-last 9"},
 		{"alice/main", Forget, "3 snapshots removed, 2 kept", "--keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 3; tag pre-stop: --keep-last 2"},
-		{"alice/main", Prune, "pruned", "prune --max-unused 5%"},
+		{"alice/main", Prune, "pruned, freed 20.123 KiB, 8.132 MiB remaining", "prune --max-unused 5%"},
 		{"alice/main", Check, "no errors found", "check subset"},
 	} {
 		id, err := e.m.Submit(context.Background(), c.repo, c.typ, Manual)
@@ -540,7 +571,7 @@ func TestMaintenancePlan(t *testing.T) {
 	e.waitDone(t)
 	waitIdle(t, e.m, "alice/main")
 	j := e.store.job(id)
-	want := "unlock: 2 locks removed; forget: 3 snapshots removed, 2 kept; prune: pruned; check: no errors found (data subset 3/3)"
+	want := "unlock: 2 locks removed; forget: 3 snapshots removed, 2 kept; prune: pruned, freed 20.123 KiB, 8.132 MiB remaining; check: no errors found (data subset 3/3)"
 	if j.state != StateSucceeded || j.summary != want {
 		t.Errorf("job = %+v", j)
 	}
@@ -607,7 +638,7 @@ func TestSubmitPruneMaxUnused(t *testing.T) {
 	}
 	e.waitDone(t)
 	waitIdle(t, e.m, "alice/main")
-	if j := e.store.job(id); j.state != StateSucceeded || j.summary != "pruned (max unused 0%)" {
+	if j := e.store.job(id); j.state != StateSucceeded || j.summary != "pruned, freed 20.123 KiB, 8.132 MiB remaining (max unused 0%)" {
 		t.Errorf("job = %+v", j)
 	}
 	if data, _ := os.ReadFile(LogPath(e.m.logDir, id)); !strings.Contains(string(data), "prune --max-unused 0%") {
@@ -617,5 +648,81 @@ func TestSubmitPruneMaxUnused(t *testing.T) {
 		if _, err := e.m.SubmitPrune(context.Background(), "alice/main", bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
+	}
+}
+
+func TestNotifications(t *testing.T) {
+	e := newEnv(t, false, 1)
+	run := func(typ Type, trigger Trigger) {
+		t.Helper()
+		if _, err := e.m.Submit(context.Background(), "alice/main", typ, trigger); err != nil {
+			t.Fatal(err)
+		}
+		e.waitDone(t)
+		waitIdle(t, e.m, "alice/main")
+	}
+	last := func() notify.Message {
+		t.Helper()
+		msgs := e.notifier.messages()
+		if len(msgs) == 0 {
+			t.Fatal("no notification")
+		}
+		return msgs[len(msgs)-1]
+	}
+
+	// forget and prune send their summaries.
+	run(Forget, Manual)
+	if m := last(); m.Event != notify.Forget || m.Title != "forget alice/main: 3 snapshots removed, 2 kept" {
+		t.Errorf("forget: %+v", m)
+	}
+	run(Prune, Manual)
+	if m := last(); m.Event != notify.Prune || !strings.Contains(m.Title, "freed 20.123 KiB") || !strings.Contains(m.Body, "Took") {
+		t.Errorf("prune: %+v", m)
+	}
+	// Snapshots, unlock and a successful check send nothing.
+	n := len(e.notifier.messages())
+	run(Snapshots, Manual)
+	run(Unlock, Manual)
+	run(Check, Manual)
+	if len(e.notifier.messages()) != n {
+		t.Errorf("unexpected: %+v", e.notifier.messages()[n:])
+	}
+
+	// A plan run sends one message with its forget and prune steps; with
+	// the prune summary switched off only the forget line remains.
+	e.store.plans["alice/main"] = store.Plan{Unlock: true, Forget: true, Prune: true, Check: true}
+	run(Maintenance, Schedule)
+	m := last()
+	if m.Title != "maintenance done: alice/main" || !strings.Contains(m.Body, "forget: 3 snapshots removed") || !strings.Contains(m.Body, "prune: pruned, freed") || strings.Contains(m.Body, "unlock") {
+		t.Errorf("plan: %+v", m)
+	}
+	e.notifier.off[notify.Prune] = true
+	run(Maintenance, Schedule)
+	if m := last(); strings.Contains(m.Body, "prune:") || !strings.Contains(m.Body, "forget:") {
+		t.Errorf("prune switched off: %+v", m)
+	}
+	e.notifier.off[notify.Forget] = true
+	n = len(e.notifier.messages())
+	run(Maintenance, Schedule)
+	if len(e.notifier.messages()) != n {
+		t.Error("message although both summaries are off")
+	}
+
+	// A failure is reported with the error.
+	e.runner.pruneErr = errors.New("disk full")
+	run(Prune, Manual)
+	if m := last(); m.Event != notify.Failed || m.Title != "prune failed: alice/main" || !strings.Contains(m.Body, "disk full") {
+		t.Errorf("failure: %+v", m)
+	}
+}
+
+func TestPruneStats(t *testing.T) {
+	var p pruneStats
+	// Written in pieces, with progress lines, as restic does.
+	for _, chunk := range []string{"[0:00] 100.00%  32 / 32 packs processed\r\n\nto repack:  20 blobs / 1.955 MiB\ntotal pr", "une:          62 blobs / 20.123 KiB\nremaining:            32 blobs / 8.132 MiB\nunused size after prune: 70 B\n"} {
+		_, _ = p.Write([]byte(chunk))
+	}
+	if p.freed != "20.123 KiB" || p.remaining != "8.132 MiB" {
+		t.Errorf("freed %q, remaining %q", p.freed, p.remaining)
 	}
 }

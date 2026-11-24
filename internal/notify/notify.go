@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -91,7 +90,6 @@ type Notifier struct {
 	logger     *slog.Logger
 
 	queue chan Message
-	wg    sync.WaitGroup
 }
 
 // New returns a Notifier for the webhook url (empty: disabled). token, if
@@ -108,12 +106,10 @@ func New(url, token string, enabled Enabled, logger *slog.Logger) *Notifier {
 func (n *Notifier) Configured() bool { return n != nil && n.url != "" }
 
 // Run sends queued messages until ctx ends; call it once, in a goroutine
-// (like a consumer Task of a Channel<T> in C#). Messages still queued at
-// the end are sent with a short grace period, so a shutdown does not lose
-// a final failure notice.
+// (like a consumer Task of a Channel<T> in C#), and wait for it to return
+// at shutdown. Messages still queued at the end are sent with a short
+// grace period, so a shutdown does not lose a final failure notice.
 func (n *Notifier) Run(ctx context.Context) {
-	n.wg.Add(1)
-	defer n.wg.Done()
 	for {
 		select {
 		case m := <-n.queue:
@@ -133,16 +129,16 @@ func (n *Notifier) Run(ctx context.Context) {
 	}
 }
 
-// Wait blocks until Run has returned.
-func (n *Notifier) Wait() { n.wg.Wait() }
+// Enabled reports whether messages of event e would be sent: a webhook is
+// configured and the event is switched on.
+func (n *Notifier) Enabled(ctx context.Context, e Event) bool {
+	return n.Configured() && (e == Test || n.enabled == nil || n.enabled(ctx, e))
+}
 
 // Notify queues a message if notifications are configured and its event is
 // enabled. It never blocks: with a full queue the message is dropped.
 func (n *Notifier) Notify(ctx context.Context, m Message) {
-	if !n.Configured() {
-		return
-	}
-	if m.Event != Test && n.enabled != nil && !n.enabled(ctx, m.Event) {
+	if !n.Enabled(ctx, m.Event) {
 		return
 	}
 	select {

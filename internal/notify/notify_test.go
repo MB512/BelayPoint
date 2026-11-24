@@ -80,7 +80,8 @@ func TestQueueAndSwitches(t *testing.T) {
 	off := map[Event]bool{Forget: true}
 	n := New(srv.URL, "", func(_ context.Context, e Event) bool { return !off[e] }, quiet())
 	ctx, cancel := context.WithCancel(context.Background())
-	go n.Run(ctx)
+	done := make(chan struct{})
+	go func() { n.Run(ctx); close(done) }()
 
 	n.Notify(ctx, Message{Event: Failed, Title: "a"})
 	n.Notify(ctx, Message{Event: Forget, Title: "switched off"})
@@ -90,7 +91,7 @@ func TestQueueAndSwitches(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
-	n.Wait()
+	<-done
 	if f.count() != 2 {
 		t.Fatalf("%d messages sent, want 2", f.count())
 	}
