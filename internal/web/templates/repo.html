@@ -1,25 +1,65 @@
 {{template "top" .}}
 {{with .Repo}}
 <p>User {{.Owner}}. Password: {{if .Password}}stored{{else}}<strong>not set</strong>{{end}}
-(<a href="/repos/password?repo={{.Path}}">{{if .Password}}change{{else}}set{{end}}</a>).</p>
+(<a href="/repos/password?repo={{.Path}}">{{if .Password}}change{{else}}set{{end}}</a>).
+{{with .Plan}}{{if and .Enabled .Next}}Next scheduled run: <strong>{{.Next}}</strong>.{{else}}No scheduled run.{{end}}{{end}}
+Policy: {{if .Custom}}own{{else}}default{{end}}.</p>
 
-{{if and $.JobsAvailable .Password}}
-<h2>Maintenance</h2>
+<nav class="tabs" aria-label="Repository">
+<a href="/repos/view?repo={{.Path}}&amp;tab=run"{{if eq .Tab "run"}} aria-current="page"{{end}}>Run now</a>
+<a href="/repos/view?repo={{.Path}}&amp;tab=retention"{{if eq .Tab "retention"}} aria-current="page"{{end}}>Retention</a>
+<a href="/repos/view?repo={{.Path}}&amp;tab=schedule"{{if eq .Tab "schedule"}} aria-current="page"{{end}}>Schedule</a>
+</nav>
+
+{{if eq .Tab "run"}}
+{{if not $.JobsAvailable}}<p class="error">restic is not available; see the container log.</p>
+{{else if not .Password}}<p>Set the <a href="/repos/password?repo={{.Path}}">repository password</a> first: BelayPoint needs it to run restic.</p>
+{{else}}
+<section class="action">
+<h3>Unlock</h3>
+<p class="muted">Removes stale locks: locks whose process is gone or that were not refreshed for 30 minutes
+(left by crashed or interrupted clients).</p>
+<div class="buttons">
+<form method="post" action="/repos/unlock"><input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="repo" value="{{.Path}}"><button type="submit">Unlock</button></form>
+<a class="danger" href="/repos/unlock-all?repo={{.Path}}" title="restic unlock --remove-all">Remove all locks…</a>
+</div>
+</section>
+
+<section class="action">
+<h3>Forget snapshots</h3>
+<p class="muted">Removes the snapshots that the <a href="/repos/view?repo={{.Path}}&amp;tab=retention">retention policy</a> does not keep.
+They cannot be restored afterwards.</p>
+<div class="buttons"><a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=forget">Forget…</a></div>
+</section>
+
+<section class="action">
+<h3>Prune</h3>
+<p class="muted">Deletes the data no snapshot references any more (after forget); this frees the disk space.</p>
+<div class="buttons"><a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=prune">Prune…</a></div>
+</section>
+
+<section class="action">
+<h3>Check</h3>
+<p class="muted">Verifies the repository structure. With a part, it also reads that share of the data
+(<code>--read-data-subset n/t</code>); leave both fields empty to check the structure only.</p>
+<form method="post" action="/repos/maintenance" class="buttons">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="repo" value="{{.Path}}"><input type="hidden" name="job" value="check">
+<label class="inline">Read part <input type="number" name="subset_n" min="1" max="365" class="short" aria-label="part n"></label>
+<label class="inline">of <input type="number" name="subset_t" min="1" max="365" class="short" aria-label="of t parts"></label>
+<button type="submit">Check</button>
+</form>
+</section>
+
 <p class="muted">Jobs wait in the queue and run one at a time per repository. forget, prune and check take an exclusive
 lock: a client backup that starts meanwhile waits for it (or fails without <code>--retry-lock</code>).
 Results are on the <a href="/jobs">Jobs</a> page.</p>
-<div class="buttons">
-<a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=maintenance" title="Run the steps of the maintenance plan now">Run plan now…</a>
-<a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=forget">Forget…</a>
-<a class="button danger" href="/repos/maintenance?repo={{.Path}}&amp;job=prune">Prune…</a>
-<form method="post" action="/repos/maintenance"><input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-<input type="hidden" name="repo" value="{{.Path}}"><input type="hidden" name="job" value="check">
-<button type="submit" title="restic check: verifies the repository structure (reads no pack data)">Check</button></form>
-</div>
+{{end}}
 {{end}}
 
+{{if eq .Tab "schedule"}}
 {{with .Plan}}
-<h2>Maintenance plan</h2>
 <p class="muted">{{if .Enabled}}{{if .Next}}Next run: <strong>{{.Next}}</strong>.{{else}}Enabled, but not scheduled (see the container log).{{end}}{{else}}Not scheduled.{{end}}
 The plan runs as one job: the enabled steps in this order; a failed step stops it. It runs only while the vault is
 unsealed; a run while sealed (or while another job for this repository runs) is recorded as skipped.</p>
@@ -32,7 +72,7 @@ unsealed; a run while sealed (or while another job for this repository runs) is 
 <input type="text" name="schedule" value="{{.Schedule}}" placeholder="30 3 * * 0" spellcheck="false" autocomplete="off"></label>
 <fieldset><legend>Steps</legend>
 <label class="check"><input type="checkbox" name="unlock" value="yes" {{if .Unlock}}checked{{end}}> unlock: remove stale locks</label>
-<label class="check"><input type="checkbox" name="forget" value="yes" {{if .Forget}}checked{{end}}> forget: apply the retention policy below</label>
+<label class="check"><input type="checkbox" name="forget" value="yes" {{if .Forget}}checked{{end}}> forget: apply the retention policy (Retention tab)</label>
 <label class="check"><input type="checkbox" name="prune" value="yes" {{if .Prune}}checked{{end}}> prune: delete unreferenced data</label>
 <label class="check"><input type="checkbox" name="check" value="yes" {{if .Check}}checked{{end}}> check: verify the repository</label>
 </fieldset>
@@ -42,8 +82,9 @@ unsealed; a run while sealed (or while another job for this repository runs) is 
 <button type="submit">Save plan</button>
 </form>
 {{end}}
+{{end}}
 
-<h2>Retention policy</h2>
+{{if eq .Tab "retention"}}
 <p class="muted">{{if .Custom}}This repository has its own policy.{{else}}The default policy applies.{{end}}
 Rows with a tag apply first, to the snapshots with that tag (e.g. StackBelay's <code>pre-stop</code> snapshots);
 the last row covers all other snapshots. Snapshots are grouped by host and paths: every client and every backup set
@@ -83,19 +124,23 @@ Within takes a duration such as <code>14d</code>, <code>6m</code> or <code>1y6m<
 </table>
 </div>
 <div class="buttons">
-{{if $.JobsAvailable}}<button type="submit" formaction="/repos/forget-preview" title="forget --dry-run: shows what would be removed, changes nothing">Preview</button>{{end}}
 <button type="submit" formaction="/repos/policy">Save policy</button>
 {{if .Custom}}<button type="submit" formaction="/repos/policy" name="reset" value="yes" class="link" formnovalidate>Reset to default</button>{{end}}
 </div>
+{{if $.JobsAvailable}}<div class="buttons">
+<button type="submit" formaction="/repos/forget-preview" class="secondary" title="forget --dry-run: shows what would be removed, changes nothing">Preview these values</button>
+<small class="muted">Dry-run with the values in the table, also before saving. Changes nothing.</small>
+</div>{{end}}
 </form>
 <p class="muted">Default: <code>{{.Default}}</code>.</p>
 
 {{with .Preview}}
-<h2>Preview</h2>
-<p>With this policy, <strong>{{.Remove}} of {{add .Keep .Remove}} snapshots would be removed</strong> and {{.Keep}} kept.
+<h2>{{if .Unsaved}}Preview of the unsaved values{{else}}Preview of the saved policy{{end}}</h2>
+{{if .Unsaved}}<p class="warn">These values are not saved. Save the policy to use them for forget and the schedule.</p>{{end}}
+<p>With {{if .Unsaved}}these values{{else}}this policy{{end}}, <strong>{{.Remove}} of {{add .Keep .Remove}} snapshots would be removed</strong> and {{.Keep}} kept.
 Nothing has been changed. The space is only freed by a later prune.</p>
 {{range .Passes}}
-<h3>{{if .Tag}}Tag rule <code>{{.Tag}}</code>{{else}}Policy{{if $.Repo.Policy.TagRules}} (snapshots without a rule tag){{end}}{{end}}: {{.Remove}} removed, {{.Keep}} kept</h3>
+<h3>{{if .Tag}}Tag <code>{{.Tag}}</code>{{else}}All other snapshots{{end}}: {{.Remove}} removed, {{.Keep}} kept</h3>
 {{range .Groups}}
 <h4><code>{{.Host}}</code> {{.Paths}}</h4>
 <p>{{len .Keep}} kept, {{len .Remove}} removed.</p>
@@ -108,6 +153,7 @@ Nothing has been changed. The space is only freed by a later prune.</p>
 {{range .Keep}}<tr><td><code>{{.ID}}</code></td><td class="nowrap">{{.Time}}</td><td>{{.Tags}}</td></tr>{{end}}
 </tbody></table></details>
 {{else}}<p class="muted">No snapshots.</p>
+{{end}}
 {{end}}
 {{end}}
 {{end}}

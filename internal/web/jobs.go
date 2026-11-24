@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -22,6 +23,7 @@ import (
 // Jobs queues restic jobs (implemented by *jobs.Manager).
 type Jobs interface {
 	Submit(ctx context.Context, repo string, typ jobs.Type, trigger jobs.Trigger) (int64, error)
+	SubmitCheck(ctx context.Context, repo, subset string) (int64, error)
 	Busy(repo string) bool
 	PreviewForget(ctx context.Context, repo string, p restic.Policy) ([]restic.PassResult, error)
 }
@@ -128,6 +130,41 @@ func (s *server) submitJob(w http.ResponseWriter, r *http.Request, path string, 
 		return
 	}
 	s.Audit.Audit(r.Context(), "job submitted", fmt.Sprintf("%s, %s, job %d, %s", typ, path, id, remote(r)))
+	redirect(w, r, "/")
+}
+
+// submitCheck queues a manual check. The two optional fields subset_n and
+// subset_t ("read part n of t") become --read-data-subset n/t; both empty
+// checks the structure only.
+func (s *server) submitCheck(w http.ResponseWriter, r *http.Request, f form) {
+	path := f.get("repo")
+	if s.Jobs == nil {
+		s.renderHome(w, r, http.StatusServiceUnavailable, "restic is not available; see the container log.")
+		return
+	}
+	if _, ok := s.knownRepo(r.Context(), path); !ok {
+		http.NotFound(w, r)
+		return
+	}
+	n, t := strings.TrimSpace(f.get("subset_n")), strings.TrimSpace(f.get("subset_t"))
+	subset := ""
+	if n != "" || t != "" {
+		subset = n + "/" + t
+		if err := restic.ValidSubset(subset); err != nil {
+			s.renderHome(w, r, http.StatusBadRequest, "check for "+path+": read part n of t needs 1 ≤ n ≤ t ≤ "+strconv.Itoa(restic.MaxSubsetT)+".")
+			return
+		}
+	}
+	id, err := s.Jobs.SubmitCheck(r.Context(), path, subset)
+	if err != nil {
+		s.renderHome(w, r, jobErrorStatus(err), "check for "+path+": "+err.Error())
+		return
+	}
+	details := "check"
+	if subset != "" {
+		details += " (data subset " + subset + ")"
+	}
+	s.Audit.Audit(r.Context(), "job submitted", fmt.Sprintf("%s, %s, job %d, %s", details, path, id, remote(r)))
 	redirect(w, r, "/")
 }
 

@@ -69,6 +69,7 @@ func (s *server) setPlan(w http.ResponseWriter, r *http.Request) {
 	fail := func(msg string) {
 		d, _ := s.repoData(r.Context(), path)
 		d.Plan = &planData{Plan: p}
+		d.Tab = tabSchedule
 		s.renderRepo(w, r, http.StatusBadRequest, d, msg)
 	}
 	t, err := strconv.Atoi(strings.TrimSpace(f.get("check_subset_t")))
@@ -102,7 +103,7 @@ func (s *server) setPlan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.Audit.Audit(r.Context(), "plan changed", path+": "+planSummary(p)+", "+remote(r))
-	redirect(w, r, "/repos/view?repo="+url.QueryEscape(path))
+	redirect(w, r, "/repos/view?repo="+url.QueryEscape(path)+"&tab="+tabSchedule)
 }
 
 func planSummary(p store.Plan) string {

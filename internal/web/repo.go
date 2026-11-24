@@ -34,14 +34,36 @@ type repoData struct {
 	TagRows     []tagRow
 	Custom      bool // own policy, not the default
 	Default     restic.Policy
-	// Preview is set after "Preview forget".
+	// Tab is the visible tab: tabRun, tabRetention or tabSchedule.
+	Tab string
+	// Preview is set after "Preview these values".
 	Preview *previewData
 	Plan    *planData
+}
+
+// The tabs of the repository page (query parameter tab). Only the active
+// tab is rendered; the tabs are plain links, no JavaScript.
+const (
+	tabRun       = "run"
+	tabRetention = "retention"
+	tabSchedule  = "schedule"
+)
+
+// repoTab returns the tab named in the query, tabRun if unknown.
+func repoTab(name string) string {
+	switch name {
+	case tabRetention, tabSchedule:
+		return name
+	}
+	return tabRun
 }
 
 type previewData struct {
 	Keep, Remove int
 	Passes       []previewPass
+	// Unsaved is set when the previewed values differ from the saved
+	// policy, so the page does not pretend they are in effect.
+	Unsaved bool
 }
 
 // previewPass is one forget pass: a tag rule (Tag set) or the main policy.
@@ -73,6 +95,7 @@ func (s *server) repoPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reading the repository settings failed; see the container log", http.StatusInternalServerError)
 		return
 	}
+	d.Tab = repoTab(r.URL.Query().Get("tab"))
 	s.renderRepo(w, r, http.StatusOK, d, "")
 }
 
@@ -90,6 +113,9 @@ func (s *server) renderRepo(w http.ResponseWriter, r *http.Request, status int, 
 	d.Password = s.Vault.Has(vault.RepoSecret(d.Path))
 	d.Default = restic.DefaultPolicy
 	d.TagRows = tagRows(d.Policy)
+	if d.Tab == "" {
+		d.Tab = tabRun
+	}
 	if d.Plan == nil {
 		plan, err := s.planFor(r.Context(), d.Path)
 		if err != nil {
@@ -221,7 +247,7 @@ func (s *server) setPolicy(w http.ResponseWriter, r *http.Request) {
 	if f.get("reset") != "yes" {
 		pol, err := policyFromForm(f)
 		if err != nil {
-			s.renderRepo(w, r, http.StatusBadRequest, &repoData{Path: path, Policy: pol, Custom: true}, err.Error())
+			s.renderRepo(w, r, http.StatusBadRequest, &repoData{Path: path, Policy: pol, Custom: true, Tab: tabRetention}, err.Error())
 			return
 		}
 		p, details = &pol, pol.String()
@@ -232,7 +258,7 @@ func (s *server) setPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Audit.Audit(r.Context(), "policy changed", path+": "+details+", "+remote(r))
-	redirect(w, r, "/repos/view?repo="+url.QueryEscape(path))
+	redirect(w, r, "/repos/view?repo="+url.QueryEscape(path)+"&tab="+tabRetention)
 }
 
 // previewForget shows what forget with the policy in the form would
@@ -249,8 +275,8 @@ func (s *server) previewForget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := policyFromForm(f)
-	_, custom, _ := s.Policies.RepoPolicy(r.Context(), path)
-	d := &repoData{Path: path, Policy: p, Custom: custom}
+	saved, custom, _ := s.Policies.RepoPolicy(r.Context(), path)
+	d := &repoData{Path: path, Policy: p, Custom: custom, Tab: tabRetention}
 	if err != nil {
 		s.renderRepo(w, r, http.StatusBadRequest, d, err.Error())
 		return
@@ -271,6 +297,9 @@ func (s *server) previewForget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.Preview = s.preview(results)
+	// String lists every keep value and tag rule as restic arguments, so
+	// equal strings mean equal policies.
+	d.Preview.Unsaved = p.String() != saved.String()
 	s.renderRepo(w, r, http.StatusOK, d, "")
 }
 
@@ -302,7 +331,7 @@ func (s *server) preview(results []restic.PassResult) *previewData {
 
 // maintenanceJobs are the jobs started from the repository page; the
 // destructive ones need a confirmation page (CLAUDE.md, hard rules).
-var maintenanceJobs = map[jobs.Type]bool{jobs.Forget: true, jobs.Prune: true, jobs.Check: false, jobs.Maintenance: true}
+var maintenanceJobs = map[jobs.Type]bool{jobs.Forget: true, jobs.Prune: true, jobs.Check: false}
 
 // maintenanceData is the data of the confirmation page.
 type maintenanceData struct {
@@ -310,7 +339,6 @@ type maintenanceData struct {
 	Job    string
 	Policy string // forget: the saved policy as restic arguments
 	Custom bool
-	Plan   string // maintenance: the enabled steps
 }
 
 func (s *server) maintenancePage(w http.ResponseWriter, r *http.Request) {
@@ -320,16 +348,7 @@ func (s *server) maintenancePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := &maintenanceData{Path: path, Job: string(typ)}
-	if typ == jobs.Maintenance {
-		p, err := s.Plans.RepoPlan(r.Context(), path)
-		if err != nil {
-			s.Logger.Error("reading plan", "repo", path, "err", err)
-			http.Error(w, "reading the plan failed; see the container log", http.StatusInternalServerError)
-			return
-		}
-		d.Plan = planSteps(p)
-	}
-	if typ == jobs.Forget || typ == jobs.Maintenance {
+	if typ == jobs.Forget {
 		p, custom, err := s.Policies.RepoPolicy(r.Context(), path)
 		if err != nil {
 			s.Logger.Error("reading policy", "repo", path, "err", err)
@@ -343,7 +362,8 @@ func (s *server) maintenancePage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// startMaintenance queues forget, prune (both confirmed) or check.
+// startMaintenance queues forget, prune (both confirmed) or check (with an
+// optional data subset: subset_n of subset_t).
 func (s *server) startMaintenance(w http.ResponseWriter, r *http.Request) {
 	f, ok := s.postForm(w, r)
 	if !ok {
@@ -358,6 +378,10 @@ func (s *server) startMaintenance(w http.ResponseWriter, r *http.Request) {
 	}
 	if destructive && f.get("confirm") != "yes" {
 		http.Error(w, "not confirmed", http.StatusBadRequest)
+		return
+	}
+	if typ == jobs.Check {
+		s.submitCheck(w, r, f)
 		return
 	}
 	s.submitJob(w, r, f.get("repo"), typ)

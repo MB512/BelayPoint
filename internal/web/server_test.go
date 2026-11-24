@@ -171,6 +171,16 @@ func (f *fakeJobs) Submit(_ context.Context, repo string, typ jobs.Type, _ jobs.
 	return int64(len(f.submitted)), nil
 }
 
+func (f *fakeJobs) SubmitCheck(_ context.Context, repo, subset string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return 0, f.err
+	}
+	f.submitted = append(f.submitted, strings.TrimSpace("check "+repo+" "+subset))
+	return int64(len(f.submitted)), nil
+}
+
 func (f *fakeJobs) PreviewForget(_ context.Context, repo string, p restic.Policy) ([]restic.PassResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

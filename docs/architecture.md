@@ -347,20 +347,34 @@ the consistent `final` snapshot; the rule keeps the two newest pre-stop
 snapshots per host and paths. In repositories without such snapshots the
 rule removes nothing.
 
-"Preview" runs every pass with `forget --dry-run --no-lock` with the values
-in the form, without saving them, and lists per pass and group which
+"Preview these values" runs every pass with `forget --dry-run --no-lock` with
+the values in the form, without saving them. The result is headed "Preview of
+the unsaved values" (with a hint to save) when they differ from the saved
+policy, "Preview of the saved policy" otherwise. It lists per pass and group which
 snapshots would be kept and removed. The passes see disjoint sets of
 snapshots, so the dry runs add up to what forget would do. It runs right away, outside the job queue: it is read-only and takes
 no lock, so it cannot conflict with jobs or client backups.
 
+### Repository page
+
+The repository page has three tabs, plain links with `?tab=` (no
+JavaScript; only the active tab is rendered, and saving returns to it):
+**Run now** (the default), **Retention** (policy table and preview) and
+**Schedule** (maintenance plan). Owner, password status, next scheduled run
+and whether the policy is the default stay above the tabs.
+
 ### Running maintenance by hand
 
-The repository page offers "Forget…", "Prune…" and "Check". forget and
+The Run now tab has one block per action: "Unlock" (stale locks; "Remove all
+locks…" leads to the typed confirmation of `unlock --remove-all`),
+"Forget…", "Prune…" and "Check". It needs the repository password. forget and
 prune open a confirmation page (forget shows the saved policy) and need a
 ticked checkbox; check runs directly. forget uses the saved policy (or the
 default), logs every removed snapshot and updates the cached snapshot summary
 from restic's result. prune uses `--max-unused 5%`. A check started by hand
-verifies the structure only (no `--read-data-subset`). All three wait up to
+verifies the structure only, or with "read part n of t" also that data
+subset (`--read-data-subset n/t`, 1 ≤ n ≤ t ≤ 365); it does not advance the
+plan's rotation. forget, prune and check wait up to
 `BELAYPOINT_LOCK_WAIT` for other locks (`--retry-lock`) and then fail with a
 lock error.
 
@@ -378,10 +392,10 @@ expression):
 
 Each step can be switched off. A failed step stops the plan; later steps do
 not run. The check rotation advances only after a successful check; `t = 0`
-checks the structure only. Every step can also be started by hand, and "Run
-plan now…" starts the whole plan (with confirmation).
+checks the structure only. Every step can also be started by hand on the
+Run now tab; the plan as a whole runs only on its schedule.
 
-The plan is set on the repository page: schedule, steps and rotation, off by
+The plan is set on the Schedule tab of the repository page: schedule, steps and rotation, off by
 default. The schedule is a 5-field cron expression (minute hour day month
 weekday) or `@daily` / `@weekly` / `@monthly` in the container's time zone
 (`TZ`), with at least one hour between runs; `@every` is refused.
