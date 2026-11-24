@@ -458,14 +458,18 @@ locks…" leads to the typed confirmation of `unlock --remove-all`),
 "Forget…", "Prune…" and "Check". It needs the repository password. A job
 started by hand leads straight to
 its log page; a refused job is reported on the page it was started from.
-forget and prune open a confirmation page; check runs directly. The forget
+forget and prune open a confirmation page (the buttons leading there are not
+red, they only open it); check runs directly. The forget
 confirmation page runs the dry-run with the saved policy (like "Preview these
 values") and shows what would be removed; "Run forget" below it is the
 confirmation. If the dry-run fails, the page offers no confirmation, so
-nobody runs a forget without seeing its effect. prune needs a ticked
-checkbox. forget uses the saved policy (or the
+nobody runs a forget without seeing its effect. The prune page explains what
+prune does and asks how much unused data may stay (`--max-unused`, whole
+percent 0-100): 5 % by default, 0 % proposed for an archive, which is pruned
+once, so rewriting much is fine. Its "Run prune" button is the confirmation.
+Scheduled prunes always use 5 %. forget uses the saved policy (or the
 default), logs every removed snapshot and updates the cached snapshot summary
-from restic's result. prune uses `--max-unused 5%`. A check started by hand
+from restic's result. prune uses `--max-unused 5%` unless set otherwise on its page. A check started by hand
 verifies the structure only, or with "read part n of t" also that data
 subset (`--read-data-subset n/t`, 1 ≤ n ≤ t ≤ 365); it does not advance the
 plan's rotation. forget, prune and check wait up to

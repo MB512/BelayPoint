@@ -24,6 +24,7 @@ import (
 type Jobs interface {
 	Submit(ctx context.Context, repo string, typ jobs.Type, trigger jobs.Trigger) (int64, error)
 	SubmitCheck(ctx context.Context, repo, subset string) (int64, error)
+	SubmitPrune(ctx context.Context, repo, maxUnused string) (int64, error)
 	Busy(repo string) bool
 	PreviewForget(ctx context.Context, repo string, p restic.Policy) ([]restic.PassResult, error)
 }
@@ -190,6 +191,40 @@ func (s *server) submitCheck(w http.ResponseWriter, r *http.Request, f form) {
 	details := "check"
 	if subset != "" {
 		details += " (data subset " + subset + ")"
+	}
+	s.Audit.Audit(r.Context(), "job submitted", fmt.Sprintf("%s, %s, job %d, %s", details, path, id, remote(r)))
+	redirect(w, r, "/jobs/"+strconv.FormatInt(id, 10)+"/log")
+}
+
+// submitPrune queues a manual prune. The field max_unused (a whole
+// percentage, 0-100) becomes --max-unused; empty is the default.
+func (s *server) submitPrune(w http.ResponseWriter, r *http.Request, f form) {
+	path := f.get("repo")
+	if s.Jobs == nil {
+		s.jobFailed(w, r, path, true, http.StatusServiceUnavailable, "restic is not available; see the container log.")
+		return
+	}
+	if _, ok := s.knownRepo(r.Context(), path); !ok {
+		http.NotFound(w, r)
+		return
+	}
+	maxUnused := ""
+	if v := strings.TrimSpace(f.get("max_unused")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > 100 {
+			s.jobFailed(w, r, path, true, http.StatusBadRequest, "prune for "+path+": the unused share must be a whole percentage from 0 to 100.")
+			return
+		}
+		maxUnused = strconv.Itoa(n) + "%"
+	}
+	id, err := s.Jobs.SubmitPrune(r.Context(), path, maxUnused)
+	if err != nil {
+		s.jobFailed(w, r, path, true, jobErrorStatus(err), "prune for "+path+": "+err.Error())
+		return
+	}
+	details := "prune"
+	if maxUnused != "" {
+		details += " (max unused " + maxUnused + ")"
 	}
 	s.Audit.Audit(r.Context(), "job submitted", fmt.Sprintf("%s, %s, job %d, %s", details, path, id, remote(r)))
 	redirect(w, r, "/jobs/"+strconv.FormatInt(id, 10)+"/log")

@@ -18,7 +18,7 @@ Snapshots created after this preview are not in it.</p>
 {{end}}{{end}}
 {{else}}
 <p class="warn"><strong>prune deletes the data in <code>{{.Path}}</code> that no snapshot references any more</strong>
-(after forget). Up to 5 % unused data may stay, so fewer files have to be rewritten.</p>
+(after forget). This frees the disk space and cannot be undone.</p>
 <p class="muted">prune can take long on a large repository and needs some free space for the rewritten files.
 Client backups wait for it (or fail) while it runs.</p>
 {{end}}
@@ -27,8 +27,11 @@ Client backups wait for it (or fail) while it runs.</p>
 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
 <input type="hidden" name="repo" value="{{.Path}}">
 <input type="hidden" name="job" value="{{.Job}}">
-{{if eq .Job "forget"}}<input type="hidden" name="confirm" value="yes">{{/* the dry-run above is the confirmation */}}
-{{else}}<label class="check"><input type="checkbox" name="confirm" value="yes" required> I want to run {{.Job}} on {{.Path}}</label>{{end}}
+<input type="hidden" name="confirm" value="yes">{{/* this page (forget: with its dry-run) is the confirmation */}}
+{{if eq .Job "prune"}}<label><span>Leave up to <input type="number" name="max_unused" min="0" max="100" value="{{.MaxUnused}}" class="short" aria-label="unused share in percent"> % unused data
+<small class="block">(<code>--max-unused</code>). Lower values free more space but rewrite more files: prune takes longer and needs
+more temporary space. The default 5 % suits repositories that keep growing.{{if .Archived}} This repository is an
+archive, so 0 % is proposed: it is pruned once, rewriting much is fine.{{else}} Use 0 % for a closed archive.{{end}}</small></span></label>{{end}}
 {{if and .Preview (not .Preview.Remove)}}<button type="submit" class="danger" disabled title="The dry-run removes nothing">Run {{.Job}}</button>
 {{else}}<button type="submit" class="danger">Run {{.Job}}</button>{{end}}
 </form>

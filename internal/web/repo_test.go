@@ -138,10 +138,17 @@ func TestMaintenance(t *testing.T) {
 		t.Error("failed preview still offers the confirmation")
 	}
 	e.jobs.err = nil
-	// prune needs no preview.
-	if body := getWithCookie(e.h, "/repos/maintenance?repo=alice/main&job=prune", cookie).Body.String(); !strings.Contains(body, `type="checkbox" name="confirm"`) || len(e.jobs.previews) != 1 {
+	// prune needs no preview and no checkbox; it proposes 5 % unused,
+	// 0 % for an archive.
+	body = getWithCookie(e.h, "/repos/maintenance?repo=alice/main&job=prune", cookie).Body.String()
+	if strings.Contains(body, `type="checkbox"`) || !strings.Contains(body, `name="max_unused" min="0" max="100" value="5"`) || len(e.jobs.previews) != 1 {
 		t.Errorf("prune confirm page: previews %v", e.jobs.previews)
 	}
+	_ = e.store.SetRepoArchived(ctx, "alice/main", true)
+	if body := getWithCookie(e.h, "/repos/maintenance?repo=alice/main&job=prune", cookie).Body.String(); !strings.Contains(body, `name="max_unused" min="0" max="100" value="0"`) || !strings.Contains(body, "This repository is an") {
+		t.Error("archive: 0 % not proposed")
+	}
+	_ = e.store.SetRepoArchived(ctx, "alice/main", false)
 	for _, bad := range []string{"job=check", "job=unlock-all", "job=x", "job=forget&repo=../x"} {
 		if w := getWithCookie(e.h, "/repos/maintenance?repo=alice/main&"+bad, cookie); w.Code != http.StatusNotFound && !strings.Contains(bad, "repo=") {
 			t.Errorf("%s: %d", bad, w.Code)
@@ -178,7 +185,17 @@ func TestMaintenance(t *testing.T) {
 			t.Errorf("check subset %v: %d", bad, w.Code)
 		}
 	}
-	want := []string{"forget alice/main", "prune alice/main", "check alice/main", "check alice/main 2/7"}
+	zero := v("prune", "yes")
+	zero.Set("max_unused", "0")
+	wantRedirect(t, post(e.h, "/repos/maintenance", cookie, zero, nil), "/jobs/5/log")
+	for _, bad := range []string{"-1", "101", "5%", "x"} {
+		b := v("prune", "yes")
+		b.Set("max_unused", bad)
+		if w := post(e.h, "/repos/maintenance", cookie, b, nil); w.Code != http.StatusBadRequest {
+			t.Errorf("max_unused %q: %d", bad, w.Code)
+		}
+	}
+	want := []string{"forget alice/main", "prune alice/main", "check alice/main", "check alice/main 2/7", "prune alice/main 0%"}
 	if strings.Join(e.jobs.submitted, ",") != strings.Join(want, ",") {
 		t.Errorf("submitted %v", e.jobs.submitted)
 	}

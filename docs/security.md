@@ -94,8 +94,8 @@ therefore the unsealed secrets; nothing in a container prevents that.
    argument lists, never a shell.
 10. **Deletion only through restic.** BelayPoint never removes files below
     `/repos` itself. `forget` and `prune` need a confirmation when started by
-    hand: `forget` runs only from the page that shows its `--dry-run` result
-    (no result, no button), `prune` needs a ticked checkbox; `unlock --remove-all`
+    hand: each runs only from its own confirmation page (`forget`: the page
+    that shows its `--dry-run` result; no result, no button); `unlock --remove-all`
     needs the repository path typed. Only stale locks are removed
     automatically.
 11. **`.htpasswd` integrity.** Atomic replace (temp file, `fsync`, `rename`),

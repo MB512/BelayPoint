@@ -370,6 +370,10 @@ func (s *server) previewForget(w http.ResponseWriter, r *http.Request) {
 	s.renderRepo(w, r, http.StatusOK, d, "")
 }
 
+// defaultMaxUnusedPercent is restic.DefaultMaxUnused as a number, the
+// value proposed on the prune page.
+const defaultMaxUnusedPercent = 5
+
 // maintenanceJobs are the jobs started from the repository page; the
 // destructive ones need a confirmation page (CLAUDE.md, hard rules).
 var maintenanceJobs = map[jobs.Type]bool{jobs.Forget: true, jobs.Prune: true, jobs.Check: false}
@@ -384,6 +388,10 @@ type maintenanceData struct {
 	// (PreviewErr set) the page offers no confirmation.
 	Preview    *previewData
 	PreviewErr string
+	// prune: the proposed --max-unused percentage (0 for an archive: it
+	// is pruned once, so rewriting much is fine) and the archive flag.
+	MaxUnused int
+	Archived  bool
 }
 
 func (s *server) maintenancePage(w http.ResponseWriter, r *http.Request) {
@@ -393,6 +401,12 @@ func (s *server) maintenancePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := &maintenanceData{Path: path, Job: string(typ)}
+	if typ == jobs.Prune {
+		d.MaxUnused = defaultMaxUnusedPercent
+		if flags, err := s.Flags.RepoFlags(r.Context(), path); err == nil && flags.Archived {
+			d.Archived, d.MaxUnused = true, 0
+		}
+	}
 	if typ == jobs.Forget {
 		p, custom, err := s.Policies.RepoPolicy(r.Context(), path)
 		if err != nil {
@@ -445,8 +459,12 @@ func (s *server) startMaintenance(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not confirmed", http.StatusBadRequest)
 		return
 	}
-	if typ == jobs.Check {
+	switch typ {
+	case jobs.Check:
 		s.submitCheck(w, r, f)
+		return
+	case jobs.Prune:
+		s.submitPrune(w, r, f)
 		return
 	}
 	s.submitJob(w, r, f.get("repo"), typ, true)
