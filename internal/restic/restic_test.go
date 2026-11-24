@@ -635,3 +635,15 @@ func TestRealTagRules(t *testing.T) {
 		t.Errorf("kept = %d, want all 3 remaining", len(Kept(res)))
 	}
 }
+
+func TestValidSubset(t *testing.T) {
+	for s, ok := range map[string]bool{
+		"1/1": true, "3/7": true, "365/365": true,
+		"": false, "0/7": false, "8/7": false, "1/366": false, "1/0": false,
+		"-1/7": false, "1/7/2": false, "10%": false, "1 /7": false, "1/7 ": false,
+	} {
+		if err := ValidSubset(s); (err == nil) != ok {
+			t.Errorf("ValidSubset(%q) = %v, want ok=%v", s, err, ok)
+		}
+	}
+}

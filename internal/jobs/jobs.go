@@ -114,9 +114,10 @@ type Manager struct {
 }
 
 type task struct {
-	id   int64
-	repo string
-	typ  Type
+	id     int64
+	repo   string
+	typ    Type
+	subset string // manual check: --read-data-subset n/t, "" for none
 }
 
 // Options configure a Manager.
@@ -192,6 +193,23 @@ func (m *Manager) Submit(ctx context.Context, repo string, typ Type, trigger Tri
 	if !typ.Valid() {
 		return 0, fmt.Errorf("%w: %q", ErrUnknown, typ)
 	}
+	return m.submit(ctx, task{repo: repo, typ: typ}, trigger)
+}
+
+// SubmitCheck queues a manual check that also reads the data subset
+// ("n/t", see restic.ValidSubset; "" checks the structure only). It does
+// not advance the check rotation of the maintenance plan.
+func (m *Manager) SubmitCheck(ctx context.Context, repo, subset string) (int64, error) {
+	if subset != "" {
+		if err := restic.ValidSubset(subset); err != nil {
+			return 0, err
+		}
+	}
+	return m.submit(ctx, task{repo: repo, typ: Check, subset: subset}, Manual)
+}
+
+func (m *Manager) submit(ctx context.Context, t task, trigger Trigger) (int64, error) {
+	repo := t.repo
 	if m.secrets.Sealed() {
 		return 0, ErrSealed
 	}
@@ -209,14 +227,15 @@ func (m *Manager) Submit(ctx context.Context, repo string, typ Type, trigger Tri
 	if len(m.queue) == cap(m.queue) {
 		return 0, ErrQueueFull
 	}
-	id, err := m.store.AddJob(ctx, repo, string(typ), string(trigger), m.now())
+	id, err := m.store.AddJob(ctx, repo, string(t.typ), string(trigger), m.now())
 	if err != nil {
 		return 0, err
 	}
 	m.busy[repo] = id
-	// Cannot block: the length was checked under m.mu, and only Submit
+	// Cannot block: the length was checked under m.mu, and only submit
 	// sends.
-	m.queue <- task{id: id, repo: repo, typ: typ}
+	t.id = id
+	m.queue <- t
 	return id, nil
 }
 
@@ -339,7 +358,7 @@ func (m *Manager) execute(ctx, record context.Context, t task, dir string, pw []
 	case Prune:
 		return m.prune(ctx, dir, pw, jl)
 	case Check:
-		return m.check(ctx, dir, pw, "", jl)
+		return m.check(ctx, dir, pw, t.subset, jl)
 	case Maintenance:
 		return m.maintenance(ctx, record, t.repo, dir, pw, jl)
 	}

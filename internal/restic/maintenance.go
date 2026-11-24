@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -69,9 +70,29 @@ func (c *CLI) Prune(ctx context.Context, dir string, password []byte, unused str
 	return c.run(ctx, dir, password, args, log, log)
 }
 
+// ValidSubset checks a --read-data-subset value of the form "n/t": part n
+// of t, 1 <= n <= t <= MaxSubsetT.
+func ValidSubset(subset string) error {
+	nStr, tStr, ok := strings.Cut(subset, "/")
+	n, errN := strconv.Atoi(nStr)
+	t, errT := strconv.Atoi(tStr)
+	if !ok || errN != nil || errT != nil || n < 1 || n > t || t > MaxSubsetT {
+		return fmt.Errorf("invalid data subset %q: want n/t with 1 <= n <= t <= %d", subset, MaxSubsetT)
+	}
+	return nil
+}
+
+// MaxSubsetT bounds t in a "n/t" data subset (one part per day for a year).
+const MaxSubsetT = 365
+
 // Check verifies the repository structure; with subset (e.g. "2/7") it
 // also reads that part of the data. Output goes to log.
 func (c *CLI) Check(ctx context.Context, dir string, password []byte, subset string, log io.Writer) error {
+	if subset != "" {
+		if err := ValidSubset(subset); err != nil {
+			return err
+		}
+	}
 	args := append([]string{"check"}, c.lockArgs()...)
 	if subset != "" {
 		args = append(args, "--read-data-subset", subset)

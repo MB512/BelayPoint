@@ -572,3 +572,27 @@ func TestMaintenancePlan(t *testing.T) {
 		t.Errorf("job = %+v, steps %v", j, e.runner.steps)
 	}
 }
+
+// A manual check reads the requested data subset and leaves the plan's
+// check rotation alone; an invalid subset is refused before queueing.
+func TestSubmitCheckSubset(t *testing.T) {
+	e := newEnv(t, false, 1)
+	e.store.plans["alice/main"] = store.Plan{Check: true, CheckSubsetT: 7, CheckSubsetN: 2}
+	id, err := e.m.SubmitCheck(context.Background(), "alice/main", "3/5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.waitDone(t)
+	waitIdle(t, e.m, "alice/main")
+	if j := e.store.job(id); j.state != StateSucceeded || j.summary != "no errors found (data subset 3/5)" {
+		t.Errorf("job = %+v", j)
+	}
+	if n := e.store.plans["alice/main"].CheckSubsetN; n != 2 {
+		t.Errorf("manual check advanced the rotation to %d", n)
+	}
+	for _, bad := range []string{"0/5", "6/5", "1/366", "1/", "a/b", "1/5; rm"} {
+		if _, err := e.m.SubmitCheck(context.Background(), "alice/main", bad); err == nil {
+			t.Errorf("subset %q accepted", bad)
+		}
+	}
+}
