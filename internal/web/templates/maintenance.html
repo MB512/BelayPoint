@@ -29,7 +29,8 @@ Client backups wait for it (or fail) while it runs.</p>
 <input type="hidden" name="job" value="{{.Job}}">
 {{if eq .Job "forget"}}<input type="hidden" name="confirm" value="yes">{{/* the dry-run above is the confirmation */}}
 {{else}}<label class="check"><input type="checkbox" name="confirm" value="yes" required> I want to run {{.Job}} on {{.Path}}</label>{{end}}
-<button type="submit" class="danger">Run {{.Job}}</button>
+{{if and .Preview (not .Preview.Remove)}}<button type="submit" class="danger" disabled title="The dry-run removes nothing">Run {{.Job}}</button>
+{{else}}<button type="submit" class="danger">Run {{.Job}}</button>{{end}}
 </form>
 {{end}}
 <p><a href="/repos/view?repo={{.Path}}">Cancel</a></p>

@@ -220,8 +220,9 @@ func TestTagRules(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("preview: %d", w.Code)
 	}
-	for _, want := range []string{"Tag <code>pre-stop</code>: 1 removed", "Tag <code>pre-restore</code>: 1 removed",
-		"All other snapshots: 2 removed, 1 kept", "Preview of the unsaved values", "4 of 5 snapshots would be removed"} {
+	for _, want := range []string{"Tag <code>pre-stop</code></strong>", "· keep last 1, within 3d ·", "1 removed in 1 group, 0 kept",
+		"Tag <code>pre-restore</code></strong>", "· keep weekly 2 ·",
+		"All other snapshots</strong>", "· keep daily 7 ·", "2 removed in 1 group, 1 kept", "Preview of the unsaved values", "4 of 5 snapshots would be removed"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("preview lacks %q", want)
 		}

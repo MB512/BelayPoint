@@ -28,6 +28,7 @@ var staticFS embed.FS
 
 var templates = template.Must(template.New("").Funcs(template.FuncMap{
 	"add": func(a, b int) int { return a + b },
+	"mod": func(a, b int) int { return a % b },
 	"active": func(title, want string) string {
 		if title == want {
 			return "page"

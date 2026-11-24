@@ -159,6 +159,7 @@ type fakeJobs struct {
 	previews  []string
 	busy      map[string]bool
 	err       error
+	keepAll   bool // PreviewForget removes nothing
 }
 
 func (f *fakeJobs) Submit(_ context.Context, repo string, typ jobs.Type, _ jobs.Trigger) (int64, error) {
@@ -189,6 +190,9 @@ func (f *fakeJobs) PreviewForget(_ context.Context, repo string, p restic.Policy
 	}
 	f.previews = append(f.previews, repo+" "+p.String())
 	t0 := time.Date(2026, 11, 1, 3, 0, 0, 0, time.UTC)
+	if f.keepAll {
+		return []restic.PassResult{{Groups: []restic.ForgetGroup{{Host: "pc", Keep: []restic.Snapshot{{ShortID: "keep0001", Time: t0}}}}}}, nil
+	}
 	var res []restic.PassResult
 	for _, r := range p.TagRules {
 		res = append(res, restic.PassResult{Tag: r.Tag, Groups: []restic.ForgetGroup{{

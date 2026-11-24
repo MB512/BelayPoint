@@ -75,31 +75,6 @@ func repoTab(name string) string {
 	return tabRun
 }
 
-type previewData struct {
-	Keep, Remove int
-	Passes       []previewPass
-	// Unsaved is set when the previewed values differ from the saved
-	// policy, so the page does not pretend they are in effect.
-	Unsaved bool
-}
-
-// previewPass is one forget pass: a tag rule (Tag set) or the main policy.
-type previewPass struct {
-	Tag          string
-	Keep, Remove int
-	Groups       []previewGroup
-}
-
-type previewGroup struct {
-	Host, Paths string
-	Keep        []snapshotRow
-	Remove      []snapshotRow
-}
-
-type snapshotRow struct {
-	ID, Time, Tags string
-}
-
 func (s *server) repoPage(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("repo")
 	if _, ok := s.knownRepo(r.Context(), path); !ok {
@@ -382,37 +357,11 @@ func (s *server) previewForget(w http.ResponseWriter, r *http.Request) {
 		s.renderRepo(w, r, status, d, "Preview failed: "+err.Error())
 		return
 	}
-	d.Preview = s.preview(results)
+	d.Preview = s.preview(p, results)
 	// String lists every keep value and tag rule as restic arguments, so
 	// equal strings mean equal policies.
 	d.Preview.Unsaved = p.String() != saved.String()
 	s.renderRepo(w, r, http.StatusOK, d, "")
-}
-
-func (s *server) preview(results []restic.PassResult) *previewData {
-	rows := func(list []restic.Snapshot) []snapshotRow {
-		out := make([]snapshotRow, 0, len(list))
-		for _, sn := range list {
-			out = append(out, snapshotRow{
-				ID: sn.ShortID, Time: sn.Time.In(s.Location).Format("2006-01-02 15:04"),
-				Tags: strings.Join(sn.Tags, ", "),
-			})
-		}
-		return out
-	}
-	d := &previewData{Keep: len(restic.Kept(results)), Remove: restic.Removed(results)}
-	for _, r := range results {
-		pass := previewPass{Tag: r.Tag}
-		for _, g := range r.Groups {
-			pass.Keep += len(g.Keep)
-			pass.Remove += len(g.Remove)
-			pass.Groups = append(pass.Groups, previewGroup{
-				Host: g.Host, Paths: strings.Join(g.Paths, ", "), Keep: rows(g.Keep), Remove: rows(g.Remove),
-			})
-		}
-		d.Passes = append(d.Passes, pass)
-	}
-	return d
 }
 
 // maintenanceJobs are the jobs started from the repository page; the
@@ -469,7 +418,7 @@ func (s *server) forgetDryRun(ctx context.Context, path string, p restic.Policy)
 		}
 		return nil, "The preview (dry-run) failed: " + err.Error()
 	}
-	return s.preview(results), ""
+	return s.preview(p, results), ""
 }
 
 // startMaintenance queues forget, prune (both confirmed) or check (with an

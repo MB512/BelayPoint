@@ -186,3 +186,30 @@ form.inline { display: inline; margin: 0; }
 .toolbar-bottom { margin-top: 1rem; }
 section.ownerkey { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .75rem 1.25rem; margin: 1rem 0; }
 section.ownerkey h2 { margin-top: 0; font-size: 1.1rem; }
+/* Forget dry-run (#8): a section per pass, a row per group with a
+   timeline. Columns: name, count, timeline. */
+.preview details.pass { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .5rem 1rem; margin: 0 0 .75rem; }
+.preview details.pass > summary { cursor: pointer; padding: .25rem 0; }
+.preview .removes { color: var(--danger); font-weight: 600; }
+.preview .tl { display: grid; grid-template-columns: minmax(7rem, 14rem) 4.5rem 1fr; gap: 0 .75rem; align-items: center; }
+.preview .tl svg { display: block; }
+.preview .tl.axis { margin: .5rem 0 .25rem; }
+.preview .tl.axis text { font-size: .7rem; fill: var(--muted); }
+.preview rect.band { fill: var(--bg); }
+.preview rect.band.alt { fill: var(--line); opacity: .45; }
+.preview circle.kept { fill: var(--accent); }
+.preview circle.removed { fill: none; stroke: var(--danger); stroke-width: 1.25px; }
+.preview .tl-host { font-weight: 600; margin: .6rem 0 .1rem; }
+.preview details.grp > summary { list-style: none; cursor: pointer; padding: 1px 0; }
+.preview details.grp > summary::-webkit-details-marker { display: none; }
+.preview details.grp > summary:hover .name { text-decoration: underline; }
+.preview .tl .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: .75rem; }
+.preview details.grp[open] { margin-bottom: .5rem; }
+.preview table.snaps { margin: .25rem 0 .5rem; font-size: .9em; }
+.preview table.snaps tr.removed td { color: var(--danger); }
+.preview details.unchanged > summary { cursor: pointer; color: var(--muted); margin: .5rem 0 0; }
+.preview p.legend { font-size: .85em; }
+@media (max-width: 40rem) {
+  .preview .tl { grid-template-columns: 1fr 4rem; }
+  .preview .tl svg { grid-column: 1 / -1; }
+}

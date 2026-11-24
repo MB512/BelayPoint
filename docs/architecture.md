@@ -387,10 +387,31 @@ rule removes nothing.
 "Preview these values" runs every pass with `forget --dry-run --no-lock` with
 the values in the form, without saving them. The result is headed "Preview of
 the unsaved values" (with a hint to save) when they differ from the saved
-policy, "Preview of the saved policy" otherwise. It lists per pass and group which
-snapshots would be kept and removed. The passes see disjoint sets of
-snapshots, so the dry runs add up to what forget would do. It runs right away, outside the job queue: it is read-only and takes
-no lock, so it cannot conflict with jobs or client backups.
+policy, "Preview of the saved policy" otherwise. The passes see disjoint sets
+of snapshots, so the dry runs add up to what forget would do. It runs right
+away, outside the job queue: it is read-only and takes no lock, so it cannot
+conflict with jobs or client backups.
+
+The result (#8, same display on the Retention tab and the forget
+confirmation page) starts with one line across all passes ("36 of 309
+snapshots would be removed" / "Nothing to remove"). Then one section per
+pass in forget's order (tag rules, then "all other snapshots"); its header
+names the rules in words and the result, and a section that removes nothing
+is collapsed to that line. Tag rule snapshots are not merged into the main
+policy's rows: they are kept for a different reason. Inside a section, one
+row per host+paths group (hosts as sub-headings, the common path prefix
+left out), groups that lose snapshots first; unchanged groups are collapsed.
+Each row is a timeline: kept snapshots as filled dots drawn over removed
+ones as red rings. The time axis is split into bands derived from the
+pass's rules (keep-within, then hourly … yearly, each covering only what
+reaches further back than the finer rules, plus "older"), each band as wide
+as its number of slots, so recent days are not squashed by years of
+history; a pass with keep-last only gets a plain time axis. The bands are
+nominal: restic counts days or weeks that have snapshots, so with gaps it
+keeps further back. Hovering a dot shows id, time, tags and the rules that
+keep it (restic's `reasons` from `forget --json`); clicking a row opens its
+snapshot list. On the confirmation page "Run forget" is disabled when the
+dry-run removes nothing.
 
 ### Repository page
 
