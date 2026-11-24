@@ -16,6 +16,14 @@ const DefaultMaxUnused = "5%"
 
 var maxUnused = regexp.MustCompile(`^([0-9]{1,2}(\.[0-9]+)?%|100%|unlimited)$`)
 
+// ValidMaxUnused checks a --max-unused value ("5%", "0%", "unlimited").
+func ValidMaxUnused(v string) error {
+	if !maxUnused.MatchString(v) {
+		return fmt.Errorf("invalid --max-unused %q: want a percentage from 0%% to 100%% or unlimited", v)
+	}
+	return nil
+}
+
 // lockArgs makes restic wait for other locks instead of failing at once
 // (issue #2).
 func (c *CLI) lockArgs() []string {
@@ -63,8 +71,8 @@ func (c *CLI) Forget(ctx context.Context, dir string, password []byte, p Policy,
 // Prune removes data no snapshot references (exclusive lock). restic's
 // text output goes to log.
 func (c *CLI) Prune(ctx context.Context, dir string, password []byte, unused string, log io.Writer) error {
-	if !maxUnused.MatchString(unused) {
-		return fmt.Errorf("invalid --max-unused %q", unused)
+	if err := ValidMaxUnused(unused); err != nil {
+		return err
 	}
 	args := append([]string{"prune", "--max-unused", unused}, c.lockArgs()...)
 	return c.run(ctx, dir, password, args, log, log)

@@ -4,6 +4,7 @@
 package jobs
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -118,6 +119,8 @@ type task struct {
 	repo   string
 	typ    Type
 	subset string // manual check: --read-data-subset n/t, "" for none
+	// maxUnused is a manual prune's --max-unused; "" for the default.
+	maxUnused string
 }
 
 // Options configure a Manager.
@@ -206,6 +209,18 @@ func (m *Manager) SubmitCheck(ctx context.Context, repo, subset string) (int64, 
 		}
 	}
 	return m.submit(ctx, task{repo: repo, typ: Check, subset: subset}, Manual)
+}
+
+// SubmitPrune queues a manual prune that may leave up to maxUnused unused
+// data ("0%" rewrites as much as possible, e.g. for an archive; "" is
+// restic.DefaultMaxUnused).
+func (m *Manager) SubmitPrune(ctx context.Context, repo, maxUnused string) (int64, error) {
+	if maxUnused != "" {
+		if err := restic.ValidMaxUnused(maxUnused); err != nil {
+			return 0, err
+		}
+	}
+	return m.submit(ctx, task{repo: repo, typ: Prune, maxUnused: maxUnused}, Manual)
 }
 
 func (m *Manager) submit(ctx context.Context, t task, trigger Trigger) (int64, error) {
@@ -356,7 +371,7 @@ func (m *Manager) execute(ctx, record context.Context, t task, dir string, pw []
 	case Forget:
 		return m.forget(ctx, record, t.repo, dir, pw, jl)
 	case Prune:
-		return m.prune(ctx, dir, pw, jl)
+		return m.prune(ctx, dir, pw, cmp.Or(t.maxUnused, restic.DefaultMaxUnused), jl)
 	case Check:
 		return m.check(ctx, dir, pw, t.subset, jl)
 	case Maintenance:
@@ -392,9 +407,12 @@ func (m *Manager) forget(ctx, record context.Context, repo, dir string, pw []byt
 	return fmt.Sprintf("%d snapshots removed, %d kept", removed, len(kept)), nil
 }
 
-func (m *Manager) prune(ctx context.Context, dir string, pw []byte, jl *jobLog) (string, error) {
-	if err := m.runner.Prune(ctx, dir, pw, restic.DefaultMaxUnused, jl); err != nil {
+func (m *Manager) prune(ctx context.Context, dir string, pw []byte, maxUnused string, jl *jobLog) (string, error) {
+	if err := m.runner.Prune(ctx, dir, pw, maxUnused, jl); err != nil {
 		return "", err
+	}
+	if maxUnused != restic.DefaultMaxUnused {
+		return "pruned (max unused " + maxUnused + ")", nil
 	}
 	return "pruned", nil
 }
@@ -434,7 +452,7 @@ func (m *Manager) maintenance(ctx, record context.Context, repo, dir string, pw 
 	}{
 		{p.Unlock, "unlock", func() (string, error) { return m.unlock(ctx, dir, pw, false, jl) }},
 		{p.Forget, "forget", func() (string, error) { return m.forget(ctx, record, repo, dir, pw, jl) }},
-		{p.Prune, "prune", func() (string, error) { return m.prune(ctx, dir, pw, jl) }},
+		{p.Prune, "prune", func() (string, error) { return m.prune(ctx, dir, pw, restic.DefaultMaxUnused, jl) }},
 		{p.Check, "check", func() (string, error) {
 			subset := ""
 			if p.CheckSubsetT > 0 {

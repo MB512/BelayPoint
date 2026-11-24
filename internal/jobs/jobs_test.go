@@ -596,3 +596,26 @@ func TestSubmitCheckSubset(t *testing.T) {
 		}
 	}
 }
+
+// A manual prune can leave less unused data (e.g. 0% for an archive); an
+// invalid value is refused before queueing.
+func TestSubmitPruneMaxUnused(t *testing.T) {
+	e := newEnv(t, false, 1)
+	id, err := e.m.SubmitPrune(context.Background(), "alice/main", "0%")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.waitDone(t)
+	waitIdle(t, e.m, "alice/main")
+	if j := e.store.job(id); j.state != StateSucceeded || j.summary != "pruned (max unused 0%)" {
+		t.Errorf("job = %+v", j)
+	}
+	if data, _ := os.ReadFile(LogPath(e.m.logDir, id)); !strings.Contains(string(data), "prune --max-unused 0%") {
+		t.Errorf("log:\n%s", data)
+	}
+	for _, bad := range []string{"0", "101%", "-1%", "5% --x", "lots"} {
+		if _, err := e.m.SubmitPrune(context.Background(), "alice/main", bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

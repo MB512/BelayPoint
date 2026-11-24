@@ -652,3 +652,12 @@ func TestValidSubset(t *testing.T) {
 		}
 	}
 }
+
+func TestValidMaxUnused(t *testing.T) {
+	for v, ok := range map[string]bool{"0%": true, "5%": true, "2.5%": true, "100%": true, "unlimited": true,
+		"": false, "5": false, "101%": false, "-1%": false, "5 %": false, "5%;x": false} {
+		if err := ValidMaxUnused(v); (err == nil) != ok {
+			t.Errorf("%q: %v, want ok=%v", v, err, ok)
+		}
+	}
+}
